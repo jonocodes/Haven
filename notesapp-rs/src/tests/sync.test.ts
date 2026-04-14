@@ -1,50 +1,86 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
-import { NotesDB } from '../lib/db'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Note, SyncMetadata } from '../lib/notes'
 
-// testDb is set in beforeEach — all mock functions close over this variable
-// so they always use the fresh per-test instance
-let testDb!: NotesDB
-let dbId = 0
+type NoteWithMeta = Note & { meta: SyncMetadata }
 
-vi.mock('../lib/db', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../lib/db')>()
-  return {
-    NotesDB: actual.NotesDB,
-    getDb: () => testDb,
-    getDirtyNotes: async () => {
-      const allMeta = await testDb.syncMeta.toArray()
-      const dirtyMeta = allMeta.filter((m: SyncMetadata) => m.isDirty)
-      const results = await Promise.all(
-        dirtyMeta.map(async (meta: SyncMetadata) => {
-          const note = await testDb.notes.get(meta.noteId)
-          return note ? { ...note, meta } : null
-        })
-      )
-      return results.filter((n: unknown): n is Note & { meta: SyncMetadata } => n !== null)
-    },
-    markSynced: async (noteId: string) => {
-      await testDb.syncMeta.update(noteId, {
-        isDirty: false,
-        lastConfirmedSyncAt: new Date().toISOString(),
-        syncError: undefined,
-      })
-    },
-    markSyncAttempted: async (noteId: string) => {
-      await testDb.syncMeta.update(noteId, { lastAttemptedSyncAt: new Date().toISOString() })
-    },
-    markSyncError: async (noteId: string, error: string) => {
-      await testDb.syncMeta.update(noteId, { syncError: error, lastAttemptedSyncAt: new Date().toISOString() })
-    },
-    getNote: async (id: string) => testDb.notes.get(id),
-    setSetting: async (key: string, value: string) => testDb.settings.put({ key, value }),
-    getPendingDeletes: async () => {
-      const rows = await testDb.pendingDeletes.toArray()
-      return rows.map((r: { noteId: string }) => r.noteId)
-    },
-    clearPendingDelete: async (noteId: string) => testDb.pendingDeletes.delete(noteId),
-  }
-})
+let notes: Map<string, Note>
+let syncMetaById: Map<string, SyncMetadata>
+let settings: Map<string, string>
+let pendingDeletes: Set<string>
+
+function nowIso(): string {
+  return new Date().toISOString()
+}
+
+function getDirtyNotesMock(): Array<NoteWithMeta> {
+  return [...syncMetaById.values()]
+    .filter((meta) => meta.isDirty)
+    .map((meta) => {
+      const note = notes.get(meta.noteId)
+      return note ? { ...note, meta } : null
+    })
+    .filter((note): note is NoteWithMeta => note !== null)
+}
+
+vi.mock('../lib/db', () => ({
+  applyRemoteNote: async (note: Note) => {
+    const existing = notes.get(note.id)
+    const merged = !existing || note.updatedAt >= existing.updatedAt
+      ? note
+      : {
+          ...existing,
+          body: note.body,
+        }
+    notes.set(note.id, merged)
+    syncMetaById.set(note.id, {
+      noteId: note.id,
+      isDirty: false,
+      lastConfirmedSyncAt: nowIso(),
+    })
+  },
+  applyRemoteTombstone: async (noteId: string) => {
+    notes.delete(noteId)
+    syncMetaById.delete(noteId)
+    pendingDeletes.delete(noteId)
+  },
+  clearPendingDelete: async (noteId: string) => {
+    pendingDeletes.delete(noteId)
+  },
+  getDirtyNotes: async () => getDirtyNotesMock(),
+  getNote: async (id: string) => notes.get(id),
+  getRemoteNotePayload: async (id: string) => notes.get(id),
+  getPendingDeletes: async () => [...pendingDeletes],
+  markSynced: async (noteId: string) => {
+    const current = syncMetaById.get(noteId)
+    if (!current) return
+    syncMetaById.set(noteId, {
+      ...current,
+      isDirty: false,
+      lastConfirmedSyncAt: nowIso(),
+      syncError: undefined,
+    })
+  },
+  markSyncAttempted: async (noteId: string) => {
+    const current = syncMetaById.get(noteId)
+    if (!current) return
+    syncMetaById.set(noteId, {
+      ...current,
+      lastAttemptedSyncAt: nowIso(),
+    })
+  },
+  markSyncError: async (noteId: string, error: string) => {
+    const current = syncMetaById.get(noteId)
+    if (!current) return
+    syncMetaById.set(noteId, {
+      ...current,
+      syncError: error,
+      lastAttemptedSyncAt: nowIso(),
+    })
+  },
+  setSetting: async (key: string, value: string) => {
+    settings.set(key, value)
+  },
+}))
 
 vi.mock('../lib/remotestorage', () => ({
   isConnected: vi.fn(),
@@ -55,10 +91,13 @@ vi.mock('../lib/remotestorage', () => ({
 }))
 
 import * as rs from '../lib/remotestorage'
-import { pushDirtyNotes, pullAndMerge, schedulePush } from '../lib/sync'
+import { pullAndMerge, pushDirtyNotes, schedulePush } from '../lib/sync'
 
 beforeEach(() => {
-  testDb = new NotesDB(`sync-test-${++dbId}`)
+  notes = new Map()
+  syncMetaById = new Map()
+  settings = new Map()
+  pendingDeletes = new Set()
   vi.mocked(rs.isConnected).mockReturnValue(true)
   vi.mocked(rs.pushNote).mockResolvedValue(undefined)
   vi.mocked(rs.pullAllNotes).mockResolvedValue([])
@@ -66,30 +105,28 @@ beforeEach(() => {
   vi.mocked(rs.listRemoteTombstoneIds).mockResolvedValue([])
 })
 
-afterEach(async () => {
-  vi.clearAllTimers()  // discard any pending fake timers before restoring
+afterEach(() => {
+  vi.clearAllTimers()
   vi.clearAllMocks()
   vi.useRealTimers()
-  await testDb.delete()
-  testDb.close()
 })
 
-// ─── helpers ────────────────────────────────────────────────────────────────
-
-async function seedNote(overrides: Partial<Note> = {}): Promise<Note> {
+async function seedNote(overrides: Partial<Note> = {}, metaOverrides: Partial<SyncMetadata> = {}): Promise<Note> {
   const note: Note = {
     id: crypto.randomUUID(),
     title: 'Note',
     body: 'Body',
-    updatedAt: new Date().toISOString(),
+    updatedAt: nowIso(),
     ...overrides,
   }
-  await testDb.notes.add(note)
-  await testDb.syncMeta.add({ noteId: note.id, isDirty: true })
+  notes.set(note.id, note)
+  syncMetaById.set(note.id, {
+    noteId: note.id,
+    isDirty: true,
+    ...metaOverrides,
+  })
   return note
 }
-
-// ─── pushDirtyNotes ──────────────────────────────────────────────────────────
 
 describe('pushDirtyNotes', () => {
   it('does nothing when offline', async () => {
@@ -104,14 +141,13 @@ describe('pushDirtyNotes', () => {
     const b = await seedNote()
     await pushDirtyNotes()
     expect(rs.pushNote).toHaveBeenCalledTimes(2)
-    const pushedIds = vi.mocked(rs.pushNote).mock.calls.map((c) => c[0].id)
+    const pushedIds = vi.mocked(rs.pushNote).mock.calls.map((call) => call[0].id)
     expect(pushedIds).toContain(a.id)
     expect(pushedIds).toContain(b.id)
   })
 
   it('does not push clean notes', async () => {
-    const note = await seedNote()
-    await testDb.syncMeta.update(note.id, { isDirty: false })
+    await seedNote({}, { isDirty: false })
     await pushDirtyNotes()
     expect(rs.pushNote).not.toHaveBeenCalled()
   })
@@ -119,56 +155,51 @@ describe('pushDirtyNotes', () => {
   it('sets lastPushAt setting when notes are pushed', async () => {
     await seedNote()
     await pushDirtyNotes()
-    const setting = await testDb.settings.get('lastPushAt')
-    expect(setting?.value).toBeDefined()
+    expect(settings.get('lastPushAt')).toBeDefined()
   })
 
   it('does not set lastPushAt when no dirty notes', async () => {
     await pushDirtyNotes()
-    expect(await testDb.settings.get('lastPushAt')).toBeUndefined()
+    expect(settings.get('lastPushAt')).toBeUndefined()
   })
 
   it('records syncError when pushNote throws', async () => {
     const note = await seedNote()
     vi.mocked(rs.pushNote).mockRejectedValueOnce(new Error('network fail'))
     await pushDirtyNotes()
-    const meta = await testDb.syncMeta.get(note.id)
-    expect(meta?.syncError).toContain('network fail')
+    expect(syncMetaById.get(note.id)?.syncError).toContain('network fail')
   })
 
   it('continues pushing other notes after one failure', async () => {
-    await seedNote()
+    const a = await seedNote()
     const b = await seedNote()
-    vi.mocked(rs.pushNote)
-      .mockRejectedValueOnce(new Error('fail'))
-      .mockResolvedValueOnce(undefined)
+    vi.mocked(rs.pushNote).mockImplementation(async (note: Note) => {
+      if (note.id === a.id) throw new Error('fail')
+    })
     await pushDirtyNotes()
     expect(rs.pushNote).toHaveBeenCalledTimes(2)
-    const metaB = await testDb.syncMeta.get(b.id)
-    expect(metaB?.isDirty).toBe(false)
+    expect(syncMetaById.get(b.id)?.isDirty).toBe(false)
   })
 
   it('pushes tombstones for pending deletes', async () => {
-    await testDb.pendingDeletes.put({ noteId: 'dead-id' })
+    pendingDeletes.add('dead-id')
     await pushDirtyNotes()
     expect(rs.pushTombstone).toHaveBeenCalledWith('dead-id')
   })
 
   it('clears pending delete after successful tombstone push', async () => {
-    await testDb.pendingDeletes.put({ noteId: 'dead-id' })
+    pendingDeletes.add('dead-id')
     await pushDirtyNotes()
-    expect(await testDb.pendingDeletes.get('dead-id')).toBeUndefined()
+    expect(pendingDeletes.has('dead-id')).toBe(false)
   })
 
   it('does not clear pending delete when pushTombstone throws', async () => {
-    await testDb.pendingDeletes.put({ noteId: 'dead-id' })
+    pendingDeletes.add('dead-id')
     vi.mocked(rs.pushTombstone).mockRejectedValueOnce(new Error('fail'))
     await pushDirtyNotes()
-    expect(await testDb.pendingDeletes.get('dead-id')).toBeDefined()
+    expect(pendingDeletes.has('dead-id')).toBe(true)
   })
 })
-
-// ─── pullAndMerge ────────────────────────────────────────────────────────────
 
 describe('pullAndMerge', () => {
   it('does nothing when offline', async () => {
@@ -181,16 +212,14 @@ describe('pullAndMerge', () => {
     const remote: Note = { id: 'remote-1', title: 'Remote', body: 'Body', updatedAt: '2024-01-01T00:00:00.000Z' }
     vi.mocked(rs.pullAllNotes).mockResolvedValue([remote])
     await pullAndMerge()
-    const stored = await testDb.notes.get('remote-1')
-    expect(stored?.title).toBe('Remote')
+    expect(notes.get(remote.id)?.title).toBe('Remote')
   })
 
   it('creates syncMeta with isDirty = false for new remote note', async () => {
     const remote: Note = { id: 'remote-2', title: 'R', body: '', updatedAt: '2024-01-01T00:00:00.000Z' }
     vi.mocked(rs.pullAllNotes).mockResolvedValue([remote])
     await pullAndMerge()
-    const meta = await testDb.syncMeta.get('remote-2')
-    expect(meta?.isDirty).toBe(false)
+    expect(syncMetaById.get(remote.id)?.isDirty).toBe(false)
   })
 
   it('overwrites local note when remote updatedAt is newer', async () => {
@@ -198,8 +227,7 @@ describe('pullAndMerge', () => {
     const remote: Note = { id: note.id, title: 'New', body: 'Updated', updatedAt: '2024-06-01T00:00:00.000Z' }
     vi.mocked(rs.pullAllNotes).mockResolvedValue([remote])
     await pullAndMerge()
-    const stored = await testDb.notes.get(note.id)
-    expect(stored?.title).toBe('New')
+    expect(notes.get(note.id)?.title).toBe('New')
   })
 
   it('keeps local note when local updatedAt is newer', async () => {
@@ -207,8 +235,7 @@ describe('pullAndMerge', () => {
     const remote: Note = { id: note.id, title: 'Old remote', body: '', updatedAt: '2024-01-01T00:00:00.000Z' }
     vi.mocked(rs.pullAllNotes).mockResolvedValue([remote])
     await pullAndMerge()
-    const stored = await testDb.notes.get(note.id)
-    expect(stored?.title).toBe('Local wins')
+    expect(notes.get(note.id)?.title).toBe('Local wins')
   })
 
   it('sets isDirty = false after overwriting with remote', async () => {
@@ -216,42 +243,36 @@ describe('pullAndMerge', () => {
     const remote: Note = { id: note.id, title: 'New', body: '', updatedAt: '2024-06-01T00:00:00.000Z' }
     vi.mocked(rs.pullAllNotes).mockResolvedValue([remote])
     await pullAndMerge()
-    const meta = await testDb.syncMeta.get(note.id)
-    expect(meta?.isDirty).toBe(false)
+    expect(syncMetaById.get(note.id)?.isDirty).toBe(false)
   })
 
   it('deletes local note when remote tombstone exists', async () => {
     const note = await seedNote()
     vi.mocked(rs.listRemoteTombstoneIds).mockResolvedValue([note.id])
     await pullAndMerge()
-    expect(await testDb.notes.get(note.id)).toBeUndefined()
-    expect(await testDb.syncMeta.get(note.id)).toBeUndefined()
+    expect(notes.has(note.id)).toBe(false)
+    expect(syncMetaById.has(note.id)).toBe(false)
   })
 
   it('clears local pendingDelete when tombstone is already remote', async () => {
-    await testDb.pendingDeletes.put({ noteId: 'dead-id' })
+    pendingDeletes.add('dead-id')
     vi.mocked(rs.listRemoteTombstoneIds).mockResolvedValue(['dead-id'])
     await pullAndMerge()
-    expect(await testDb.pendingDeletes.get('dead-id')).toBeUndefined()
+    expect(pendingDeletes.has('dead-id')).toBe(false)
   })
 
   it('does not delete notes not in tombstone list', async () => {
     const note = await seedNote()
     vi.mocked(rs.listRemoteTombstoneIds).mockResolvedValue(['some-other-id'])
     await pullAndMerge()
-    expect(await testDb.notes.get(note.id)).toBeDefined()
+    expect(notes.has(note.id)).toBe(true)
   })
 
   it('sets lastPullAt setting after pull', async () => {
     await pullAndMerge()
-    const setting = await testDb.settings.get('lastPullAt')
-    expect(setting?.value).toBeDefined()
+    expect(settings.get('lastPullAt')).toBeDefined()
   })
 })
-
-// ─── schedulePush ────────────────────────────────────────────────────────────
-// We spy on setTimeout to capture the debounced callback and call it directly,
-// which avoids fake-timer / Dexie async compatibility issues.
 
 describe('schedulePush', () => {
   let capturedCallback: (() => Promise<void>) | null = null
@@ -279,17 +300,17 @@ describe('schedulePush', () => {
   it('pushes after debounce when connected', async () => {
     const note = await seedNote()
     schedulePush(note.id)
-    await capturedCallback!()
+    await capturedCallback?.()
     expect(rs.pushNote).toHaveBeenCalledWith(expect.objectContaining({ id: note.id }))
   })
 
   it('cancels previous timer when called twice for same note', async () => {
     const note = await seedNote()
     const clearSpy = vi.spyOn(globalThis, 'clearTimeout')
-    schedulePush(note.id)  // sets timerId=1
-    schedulePush(note.id)  // cancels timerId=1, sets timerId=2
+    schedulePush(note.id)
+    schedulePush(note.id)
     expect(clearSpy).toHaveBeenCalledWith(1)
-    await capturedCallback!()  // runs the second (and only surviving) callback
+    await capturedCallback?.()
     expect(rs.pushNote).toHaveBeenCalledTimes(1)
   })
 
@@ -297,7 +318,7 @@ describe('schedulePush', () => {
     vi.mocked(rs.isConnected).mockReturnValue(false)
     const note = await seedNote()
     schedulePush(note.id)
-    await capturedCallback!()
+    await capturedCallback?.()
     expect(rs.pushNote).not.toHaveBeenCalled()
   })
 
@@ -305,13 +326,10 @@ describe('schedulePush', () => {
     vi.mocked(rs.pushNote).mockRejectedValueOnce(new Error('timeout'))
     const note = await seedNote()
     schedulePush(note.id)
-    await capturedCallback!()
-    const meta = await testDb.syncMeta.get(note.id)
-    expect(meta?.syncError).toContain('timeout')
+    await capturedCallback?.()
+    expect(syncMetaById.get(note.id)?.syncError).toContain('timeout')
   })
 })
-
-// ─── offline-first integration ───────────────────────────────────────────────
 
 describe('offline-first scenario', () => {
   it('offline edits accumulate dirty, then sync all on reconnect', async () => {
@@ -324,12 +342,11 @@ describe('offline-first scenario', () => {
     vi.mocked(rs.isConnected).mockReturnValue(true)
     await pushDirtyNotes()
 
-    const pushedIds = vi.mocked(rs.pushNote).mock.calls.map((c) => c[0].id)
+    const pushedIds = vi.mocked(rs.pushNote).mock.calls.map((call) => call[0].id)
     expect(pushedIds).toContain(a.id)
     expect(pushedIds).toContain(b.id)
-
-    expect((await testDb.syncMeta.get(a.id))?.isDirty).toBe(false)
-    expect((await testDb.syncMeta.get(b.id))?.isDirty).toBe(false)
+    expect(syncMetaById.get(a.id)?.isDirty).toBe(false)
+    expect(syncMetaById.get(b.id)?.isDirty).toBe(false)
   })
 
   it('device B receives notes created by device A via pull', async () => {
@@ -339,8 +356,8 @@ describe('offline-first scenario', () => {
     ]
     vi.mocked(rs.pullAllNotes).mockResolvedValue(remoteNotes)
     await pullAndMerge()
-    expect(await testDb.notes.get('a1')).toMatchObject({ title: 'From A' })
-    expect(await testDb.notes.get('a2')).toMatchObject({ title: 'Also A' })
+    expect(notes.get('a1')).toMatchObject({ title: 'From A' })
+    expect(notes.get('a2')).toMatchObject({ title: 'Also A' })
   })
 
   it('conflict: remote wins when remote updatedAt is later', async () => {
@@ -349,6 +366,6 @@ describe('offline-first scenario', () => {
       { id: note.id, title: 'Device A version', body: '', updatedAt: '2024-12-01T00:00:00.000Z' },
     ])
     await pullAndMerge()
-    expect((await testDb.notes.get(note.id))?.title).toBe('Device A version')
+    expect(notes.get(note.id)?.title).toBe('Device A version')
   })
 })

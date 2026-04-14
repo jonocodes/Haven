@@ -3,26 +3,15 @@ export interface TextRange {
   to: number
 }
 
-function splitWordRanges(text: string, baseOffset: number): TextRange[] {
-  const ranges: TextRange[] = []
-  const re = /\b[\p{L}\p{N}_'-]+\b/gu
-  let match: RegExpExecArray | null = re.exec(text)
-  while (match) {
-    const start = baseOffset + match.index
-    const end = start + match[0].length
-    ranges.push({ from: start, to: end })
-    match = re.exec(text)
-  }
-  return ranges
-}
-
 /**
- * Find inserted word ranges in `nextText` compared to `previousText`.
+ * Find the contiguous inserted range in `nextText` compared to `previousText`.
  * Uses common-prefix/suffix detection to isolate the changed middle span.
  */
 export function computeInsertedWordHighlights(previousText: string, nextText: string): TextRange[] {
   if (previousText === nextText) return []
-  if (!previousText.trim()) return splitWordRanges(nextText, 0)
+  if (!previousText.trim()) {
+    return nextText.trim() ? [{ from: 0, to: nextText.length }] : []
+  }
 
   let prefixLen = 0
   const maxPrefix = Math.min(previousText.length, nextText.length)
@@ -44,10 +33,6 @@ export function computeInsertedWordHighlights(previousText: string, nextText: st
   const changedStart = prefixLen
   const changedEnd = nextText.length - suffixLen
   if (changedEnd <= changedStart) return []
-
-  const insertedSegment = nextText.slice(changedStart, changedEnd)
-  const ranges = splitWordRanges(insertedSegment, changedStart)
-  if (ranges.length > 0) return ranges
 
   return [{ from: changedStart, to: changedEnd }]
 }

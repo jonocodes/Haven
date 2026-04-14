@@ -9,6 +9,11 @@ export default defineConfig({
     tailwindcss(),
     react(),
   ],
+  server: {
+    watch: {
+      ignored: ['**/*.md', '**/*.markdown'],
+    },
+  },
   test: {
     environment: 'happy-dom',
     globals: true,

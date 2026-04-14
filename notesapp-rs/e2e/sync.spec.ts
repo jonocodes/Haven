@@ -109,6 +109,38 @@ test.describe('cross-browser sync', () => {
     await ctxB.close()
   })
 
+  test('body edit in A appears in B without reload', async ({ browser, connectToRS, page }) => {
+    const ctxB = await browser.newContext()
+    const pageB = await ctxB.newPage()
+
+    await page.goto('/')
+    await pageB.goto('/')
+    await connectRS(page, connectToRS, 'bodysyncuser')
+    await connectRS(pageB, connectToRS, 'bodysyncuser')
+
+    await page.click('[data-testid="new-note-btn"]')
+    await page.fill('[data-testid="note-title"]', 'Shared Body')
+    await page.locator('[data-testid="note-body"] .cm-content').click()
+    await page.keyboard.type('alpha beta')
+    await page.click('[data-testid="back-btn"]')
+    await waitForPush(page)
+
+    await expect(pageB.locator('[data-testid="note-list"]')).toContainText('Shared Body', {
+      timeout: SYNC_TIMEOUT,
+    })
+    await pageB.locator('[data-testid="note-item"]', { hasText: 'Shared Body' }).click()
+
+    await page.locator('[data-testid="note-item"]', { hasText: 'Shared Body' }).click()
+    await page.locator('[data-testid="note-body"] .cm-content').fill('alpha beta gamma')
+    await waitForPush(page)
+
+    await expect(pageB.locator('[data-testid="note-body"] .cm-content')).toContainText('alpha beta gamma', {
+      timeout: SYNC_TIMEOUT,
+    })
+
+    await ctxB.close()
+  })
+
   test('deletion in A removes note from B', async ({ browser, rsServer, connectToRS, page }) => {
     const ctxB = await browser.newContext()
     const pageB = await ctxB.newPage()
@@ -137,6 +169,134 @@ test.describe('cross-browser sync', () => {
 
     // B should no longer see the note
     await expect(pageB.locator('[data-testid="note-list"]')).not.toContainText('Will Be Deleted', {
+      timeout: SYNC_TIMEOUT,
+    })
+
+    await ctxB.close()
+  })
+
+  test('incoming highlight appears only on the receiving editor', async ({ browser, connectToRS, page }) => {
+    const ctxB = await browser.newContext()
+    const pageB = await ctxB.newPage()
+
+    await page.goto('/')
+    await pageB.goto('/')
+    await connectRS(page, connectToRS, 'highlightuser')
+    await connectRS(pageB, connectToRS, 'highlightuser')
+
+    await page.click('[data-testid="new-note-btn"]')
+    await page.fill('[data-testid="note-title"]', 'Highlight Note')
+    await page.locator('[data-testid="note-body"] .cm-content').click()
+    await page.keyboard.type('hello world')
+    await waitForPush(page)
+
+    await page.click('[data-testid="back-btn"]')
+    await expect(pageB.locator('[data-testid="note-list"]')).toContainText('Highlight Note', {
+      timeout: SYNC_TIMEOUT,
+    })
+
+    await page.locator('[data-testid="note-item"]', { hasText: 'Highlight Note' }).click()
+    await pageB.locator('[data-testid="note-item"]', { hasText: 'Highlight Note' }).click()
+
+    await page.locator('[data-testid="note-body"] .cm-content').click()
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A')
+    await page.keyboard.type('hello brave world')
+    await waitForPush(page)
+
+    await expect(page.locator('.cm-incoming-change')).toHaveCount(0)
+    await expect(pageB.locator('.cm-incoming-change').first()).toBeVisible({
+      timeout: SYNC_TIMEOUT,
+    })
+
+    await ctxB.close()
+  })
+
+  test('body deletion converges and does not bounce back', async ({ browser, connectToRS, page }) => {
+    const ctxB = await browser.newContext()
+    const pageB = await ctxB.newPage()
+
+    await page.goto('/')
+    await pageB.goto('/')
+    await connectRS(page, connectToRS, 'deleteworduser')
+    await connectRS(pageB, connectToRS, 'deleteworduser')
+
+    await page.click('[data-testid="new-note-btn"]')
+    await page.fill('[data-testid="note-title"]', 'Delete Word')
+    await page.locator('[data-testid="note-body"] .cm-content').click()
+    await page.keyboard.type('alpha beta gamma')
+    await waitForPush(page)
+
+    await page.click('[data-testid="back-btn"]')
+    await expect(pageB.locator('[data-testid="note-list"]')).toContainText('Delete Word', {
+      timeout: SYNC_TIMEOUT,
+    })
+
+    await page.locator('[data-testid="note-item"]', { hasText: 'Delete Word' }).click()
+    await pageB.locator('[data-testid="note-item"]', { hasText: 'Delete Word' }).click()
+
+    await page.locator('[data-testid="note-body"] .cm-content').fill('alpha gamma')
+    await waitForPush(page)
+
+    await expect(pageB.locator('[data-testid="note-body"] .cm-content')).toContainText('alpha gamma', {
+      timeout: SYNC_TIMEOUT,
+    })
+    await expect(pageB.locator('[data-testid="note-body"] .cm-content')).not.toContainText('beta', {
+      timeout: SYNC_TIMEOUT,
+    })
+
+    await page.waitForTimeout(6000)
+    await expect(page.locator('[data-testid="note-body"] .cm-content')).toContainText('alpha gamma')
+    await expect(page.locator('[data-testid="note-body"] .cm-content')).not.toContainText('beta')
+
+    await ctxB.close()
+  })
+
+  test('concurrent body edits merge after reconnect', async ({ browser, connectToRS, page }) => {
+    const ctxB = await browser.newContext()
+    const pageB = await ctxB.newPage()
+
+    await page.goto('/')
+    await pageB.goto('/')
+    await connectRS(page, connectToRS, 'mergeuser')
+    await connectRS(pageB, connectToRS, 'mergeuser')
+
+    await page.click('[data-testid="new-note-btn"]')
+    await page.fill('[data-testid="note-title"]', 'Merge Note')
+    await page.locator('[data-testid="note-body"] .cm-content').click()
+    await page.keyboard.type('alpha beta')
+    await page.click('[data-testid="back-btn"]')
+    await waitForPush(page)
+
+    await expect(pageB.locator('[data-testid="note-list"]')).toContainText('Merge Note', {
+      timeout: SYNC_TIMEOUT,
+    })
+    await pageB.locator('[data-testid="note-item"]', { hasText: 'Merge Note' }).click()
+    await expect(pageB.locator('[data-testid="note-body"] .cm-content')).toContainText('alpha beta', {
+      timeout: SYNC_TIMEOUT,
+    })
+
+    await pageB.context().setOffline(true)
+
+    await page.locator('[data-testid="note-item"]', { hasText: 'Merge Note' }).click()
+    await page.locator('[data-testid="note-body"] .cm-content').fill('alpha ')
+    await waitForPush(page)
+
+    await pageB.locator('[data-testid="note-body"] .cm-content').fill('alpha Xbeta')
+
+    await pageB.context().setOffline(false)
+    await pageB.reload()
+    await connectRS(pageB, connectToRS, 'mergeuser')
+
+    await expect(pageB.locator('[data-testid="note-body"] .cm-content')).toContainText('alpha X', {
+      timeout: SYNC_TIMEOUT,
+    })
+    await expect(pageB.locator('[data-testid="note-body"] .cm-content')).not.toContainText('beta', {
+      timeout: SYNC_TIMEOUT,
+    })
+    await expect(page.locator('[data-testid="note-body"] .cm-content')).toContainText('alpha X', {
+      timeout: SYNC_TIMEOUT,
+    })
+    await expect(page.locator('[data-testid="note-body"] .cm-content')).not.toContainText('beta', {
       timeout: SYNC_TIMEOUT,
     })
 

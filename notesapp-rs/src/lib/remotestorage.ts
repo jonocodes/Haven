@@ -1,5 +1,6 @@
 import RemoteStorage from "remotestoragejs";
-import type { Note } from "./notes";
+import { createBodyState } from './crdt'
+import type { RemoteNote } from "./notes";
 
 export const rs = new RemoteStorage({ logging: true });
 
@@ -14,7 +15,7 @@ function client() {
 const NOTES_PATH = "common/notes/";
 const TOMBSTONES_PATH = "common/tombstones/";
 
-export async function pushNote(note: Note): Promise<void> {
+export async function pushNote(note: RemoteNote): Promise<void> {
   await client().storeFile(
     "application/json",
     `${NOTES_PATH}${note.id}.json`,
@@ -22,10 +23,14 @@ export async function pushNote(note: Note): Promise<void> {
   );
 }
 
-export async function pullNote(id: string): Promise<Note | null> {
+export async function pullNote(id: string): Promise<RemoteNote | null> {
   const result = await client().getFile(`${NOTES_PATH}${id}.json`);
   if (!result?.data) return null;
-  return JSON.parse(result.data as string) as Note;
+  const parsed = JSON.parse(result.data as string) as RemoteNote
+  return {
+    ...parsed,
+    crdtState: parsed.crdtState ?? createBodyState(parsed.body),
+  }
 }
 
 export async function listRemoteNoteIds(): Promise<string[]> {
@@ -36,7 +41,7 @@ export async function listRemoteNoteIds(): Promise<string[]> {
     .map((k) => k.slice(0, -5));
 }
 
-export async function pullAllNotes(): Promise<Note[]> {
+export async function pullAllNotes(): Promise<RemoteNote[]> {
   const ids = await listRemoteNoteIds();
   const notes = await Promise.all(ids.map((id) => pullNote(id)));
   return notes.filter((n): n is Note => n !== null);

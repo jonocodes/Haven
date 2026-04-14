@@ -1,10 +1,9 @@
 import { createRootRoute, Outlet } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { ConnectWidget } from '../components/ConnectButton'
 import { rs, onConnected, onDisconnected, onRemoteChange } from '../lib/remotestorage'
 import { startSyncLoop, stopSyncLoop, pullAndMerge, pushDirtyNotes } from '../lib/sync'
-import { db } from '../lib/db'
+import { useSetting } from '../lib/dbHooks'
 
 function fmt(iso: string | undefined): string {
   if (!iso) return '—'
@@ -12,8 +11,8 @@ function fmt(iso: string | undefined): string {
 }
 
 function StatusBar({ connected }: { connected: boolean }) {
-  const lastPushAt = useLiveQuery(() => db.settings.get('lastPushAt').then(s => s?.value), [])
-  const lastPullAt = useLiveQuery(() => db.settings.get('lastPullAt').then(s => s?.value), [])
+  const lastPushAt = useSetting('lastPushAt')
+  const lastPullAt = useSetting('lastPullAt')
   const [now, setNow] = useState(() => new Date().toLocaleTimeString())
 
   useEffect(() => {
@@ -38,11 +37,23 @@ function RootLayout() {
   const [connected, setConnected] = useState(rs.connected)
 
   useEffect(() => {
-    onConnected(async () => {
-      setConnected(true)
+    let cancelled = false
+
+    async function startConnectedSync() {
       await pullAndMerge()
       await pushDirtyNotes()
-      startSyncLoop()
+      if (!cancelled) {
+        startSyncLoop()
+      }
+    }
+
+    if (rs.connected) {
+      void startConnectedSync()
+    }
+
+    onConnected(async () => {
+      setConnected(true)
+      await startConnectedSync()
     })
     onDisconnected(() => {
       setConnected(false)
@@ -51,10 +62,17 @@ function RootLayout() {
     onRemoteChange(() => pullAndMerge())
 
     const onFocus = () => {
-      if (rs.connected) pushDirtyNotes()
+      if (rs.connected) {
+        void pullAndMerge()
+        void pushDirtyNotes()
+      }
     }
     window.addEventListener('focus', onFocus)
-    return () => window.removeEventListener('focus', onFocus)
+    return () => {
+      cancelled = true
+      stopSyncLoop()
+      window.removeEventListener('focus', onFocus)
+    }
   }, [])
 
   return (

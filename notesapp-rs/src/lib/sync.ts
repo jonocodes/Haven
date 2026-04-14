@@ -1,6 +1,16 @@
-import { getDb, getDirtyNotes, markSynced, markSyncAttempted, markSyncError, getNote, setSetting, getPendingDeletes, clearPendingDelete } from './db'
+import {
+  applyRemoteNote,
+  applyRemoteTombstone,
+  clearPendingDelete,
+  getDirtyNotes,
+  getRemoteNotePayload,
+  getPendingDeletes,
+  markSynced,
+  markSyncAttempted,
+  markSyncError,
+  setSetting,
+} from './db'
 import { pushNote, pullAllNotes, isConnected, pushTombstone, listRemoteTombstoneIds } from './remotestorage'
-import type { Note } from './notes'
 
 let pushTimer: ReturnType<typeof setInterval> | null = null
 let pullTimer: ReturnType<typeof setInterval> | null = null
@@ -38,22 +48,12 @@ export async function pullAndMerge(): Promise<void> {
   if (!isConnected()) return
   const remoteNotes = await pullAllNotes()
   for (const remote of remoteNotes) {
-    const local = await getNote(remote.id)
-    if (!local) {
-      await getDb().notes.add(remote)
-      await getDb().syncMeta.add({ noteId: remote.id, isDirty: false, lastConfirmedSyncAt: new Date().toISOString() })
-    } else if (remote.updatedAt > local.updatedAt) {
-      // latest updatedAt wins
-      await getDb().notes.put(remote)
-      await getDb().syncMeta.update(remote.id, { isDirty: false, lastConfirmedSyncAt: new Date().toISOString(), syncError: undefined })
-    }
+    await applyRemoteNote(remote)
   }
   // Apply tombstones from remote
   const tombstoneIds = await listRemoteTombstoneIds()
   for (const id of tombstoneIds) {
-    await getDb().notes.delete(id)
-    await getDb().syncMeta.delete(id)
-    await getDb().pendingDeletes.delete(id) // in case we also had it pending locally
+    await applyRemoteTombstone(id)
   }
 
   await setSetting('lastPullAt', new Date().toISOString())
@@ -61,8 +61,8 @@ export async function pullAndMerge(): Promise<void> {
 
 export function startSyncLoop(): void {
   stopSyncLoop()
-  pushTimer = setInterval(pushDirtyNotes, 30_000)
-  pullTimer = setInterval(pullAndMerge, 60_000)
+  pushTimer = setInterval(pushDirtyNotes, 5_000)
+  pullTimer = setInterval(pullAndMerge, 5_000)
 }
 
 export function stopSyncLoop(): void {
@@ -83,7 +83,7 @@ export function schedulePush(noteId: string): void {
     setTimeout(async () => {
       pendingPush.delete(noteId)
       if (!isConnected()) return
-      const note = await getNote(noteId)
+      const note = await getRemoteNotePayload(noteId)
       if (!note) return
       await markSyncAttempted(noteId)
       try {

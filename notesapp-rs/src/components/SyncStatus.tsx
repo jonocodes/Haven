@@ -1,12 +1,11 @@
-import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../lib/db'
+import { useSyncMeta } from '../lib/dbHooks'
 
 interface Props {
   noteId: string
 }
 
 export function SyncStatus({ noteId }: Props) {
-  const meta = useLiveQuery(() => db.syncMeta.get(noteId), [noteId])
+  const meta = useSyncMeta(noteId)
 
   if (!meta) return null
 

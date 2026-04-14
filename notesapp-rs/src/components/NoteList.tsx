@@ -1,7 +1,7 @@
 import { type ChangeEvent, useRef, useState } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { Link, useNavigate } from '@tanstack/react-router'
-import { db, createNote } from '../lib/db'
+import { createNote } from '../lib/db'
+import { useVisibleNotes } from '../lib/dbHooks'
 import { SyncStatus } from './SyncStatus'
 import { parseMarkdownToNote } from '../lib/importMarkdown'
 
@@ -11,10 +11,7 @@ export function NoteList() {
   const navigate = useNavigate()
   const importInputRef = useRef<HTMLInputElement>(null)
 
-  const notes = useLiveQuery(
-    () => db.notes.orderBy('updatedAt').reverse().filter((n) => !n.archived).toArray(),
-    []
-  )
+  const notes = useVisibleNotes()
 
   const filtered = notes && query.trim()
     ? notes.filter((n) => {

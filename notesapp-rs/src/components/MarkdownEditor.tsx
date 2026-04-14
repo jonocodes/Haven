@@ -16,6 +16,7 @@ interface Props {
   value: string
   onChange: (value: string) => void
   incomingHighlightRanges?: Array<{ from: number; to: number }>
+  syncRevision?: number
 }
 
 const setIncomingHighlightsEffect = StateEffect.define<Array<{ from: number; to: number }>>()
@@ -68,11 +69,14 @@ const baseTheme = EditorView.theme({
   },
 })
 
-export function MarkdownEditor({ value, onChange, incomingHighlightRanges = [] }: Props) {
+export function MarkdownEditor({ value, onChange, incomingHighlightRanges = [], syncRevision }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
   const clearTimerRef = useRef<number | null>(null)
+  const suppressNextChangeRef = useRef(false)
+  const syncRevisionRef = useRef<number | undefined>(undefined)
+  const hasAppliedExternalValueRef = useRef(false)
   onChangeRef.current = onChange
 
   // Mount editor once
@@ -95,6 +99,10 @@ export function MarkdownEditor({ value, onChange, incomingHighlightRanges = [] }
         EditorView.lineWrapping,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
+            if (suppressNextChangeRef.current) {
+              suppressNextChangeRef.current = false
+              return
+            }
             onChangeRef.current(update.state.doc.toString())
           }
         }),
@@ -115,12 +123,27 @@ export function MarkdownEditor({ value, onChange, incomingHighlightRanges = [] }
     const view = viewRef.current
     if (!view) return
     const current = view.state.doc.toString()
-    if (current !== value) {
-      view.dispatch({
-        changes: { from: 0, to: current.length, insert: value },
-      })
+    if (current === value) {
+      syncRevisionRef.current = syncRevision
+      return
     }
-  }, [value])
+    if (!hasAppliedExternalValueRef.current) {
+      hasAppliedExternalValueRef.current = true
+    } else if (syncRevisionRef.current === syncRevision) {
+      return
+    }
+
+    syncRevisionRef.current = syncRevision
+    const selection = view.state.selection.main
+    suppressNextChangeRef.current = true
+    view.dispatch({
+      changes: { from: 0, to: current.length, insert: value },
+      selection: {
+        anchor: Math.min(selection.anchor, value.length),
+        head: Math.min(selection.head, value.length),
+      },
+    })
+  }, [syncRevision, value])
 
   useEffect(() => {
     const view = viewRef.current

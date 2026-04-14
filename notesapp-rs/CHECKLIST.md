@@ -158,10 +158,8 @@ When comparing Dexie vs RxDB+CRDT vs PouchDB vs WatermelonDB, evaluate:
 
 * ntfy with debugging, and keep track of count of syncs
 
-* rxdb with crdt plugin
-
 * Fix missing list glyphs: https://github.com/blueberrycongee/codemirror-live-markdown/issues/1 . may need to PR upstream.
 
 * test with large data. many docs. some large and complex
 
-* add more e2e tests for crdt
+* should we be using a component library for this do reduce code? like shadcdn or something?

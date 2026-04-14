@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { useLiveQuery } from 'dexie-react-hooks'
-import { db, updateNote, archiveNote, deleteNote } from '../lib/db'
+import { updateNoteTitle, applyBodyUpdate, archiveNote, deleteNote } from '../lib/db'
+import { useNote, useSyncMeta } from '../lib/dbHooks'
 import { schedulePush, pushDirtyNotes } from '../lib/sync'
 import { SyncStatus } from './SyncStatus'
 import { MarkdownEditor } from './MarkdownEditor'
@@ -13,18 +13,24 @@ interface Props {
 
 export function NoteEditor({ noteId }: Props) {
   const navigate = useNavigate()
-  const note = useLiveQuery(() => db.notes.get(noteId), [noteId])
-  const meta = useLiveQuery(() => db.syncMeta.get(noteId), [noteId])
+  const note = useNote(noteId)
+  const meta = useSyncMeta(noteId)
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [incomingHighlights, setIncomingHighlights] = useState<TextRange[]>([])
   const [hasLoaded, setHasLoaded] = useState(false)
+  const [bodySyncRevision, setBodySyncRevision] = useState(0)
+  const currentBodyRef = useRef('')
+  const lastLocalBodyRef = useRef<string | null>(null)
+  const pendingBodySaveRef = useRef<string | null>(null)
+  const bodySaveInFlightRef = useRef(false)
 
   // Initial load
   useEffect(() => {
     if (note) {
       setTitle(note.title)
       setBody(note.body)
+      currentBodyRef.current = note.body
       setHasLoaded(true)
     }
   }, [note?.id])
@@ -32,27 +38,74 @@ export function NoteEditor({ noteId }: Props) {
   // Apply remote changes — only when not dirty (safe to overwrite local state)
   useEffect(() => {
     if (note && meta && !meta.isDirty && hasLoaded) {
-      if (note.body !== body) {
-        setIncomingHighlights(computeInsertedWordHighlights(body, note.body))
+      const previousBody = currentBodyRef.current
+      const pendingLocalBody = lastLocalBodyRef.current
+      const isLocalBodyEcho = pendingLocalBody !== null && note.body === pendingLocalBody
+
+      if (pendingLocalBody !== null && !isLocalBodyEcho) {
+        setTitle(note.title)
+        return
+      }
+
+      const isRemoteBodyChange = note.body !== previousBody && note.body !== lastLocalBodyRef.current
+
+      if (isRemoteBodyChange) {
+        setIncomingHighlights(computeInsertedWordHighlights(previousBody, note.body))
+        setBodySyncRevision((rev) => rev + 1)
       } else {
         setIncomingHighlights([])
       }
+
+      if (note.body === lastLocalBodyRef.current) {
+        lastLocalBodyRef.current = null
+      }
+
+      if (pendingBodySaveRef.current === note.body) {
+        pendingBodySaveRef.current = null
+      }
+
       setTitle(note.title)
       setBody(note.body)
+      currentBodyRef.current = note.body
     }
-  }, [note?.updatedAt, meta?.isDirty, hasLoaded])
+  }, [note?.updatedAt, note?.title, note?.body, meta?.isDirty, hasLoaded])
 
-  const save = useCallback(
-    async (newTitle: string, newBody: string) => {
-      await updateNote(noteId, { title: newTitle, body: newBody })
+  const saveTitle = useCallback(
+    async (newTitle: string) => {
+      await updateNoteTitle(noteId, newTitle)
       schedulePush(noteId)
     },
     [noteId]
   )
 
+  const flushBodySave = useCallback(async () => {
+    if (bodySaveInFlightRef.current) return
+    bodySaveInFlightRef.current = true
+
+    try {
+      while (pendingBodySaveRef.current !== null) {
+        const bodyToSave = pendingBodySaveRef.current
+        pendingBodySaveRef.current = null
+        lastLocalBodyRef.current = bodyToSave
+        await applyBodyUpdate(noteId, bodyToSave)
+        schedulePush(noteId)
+      }
+    } finally {
+      bodySaveInFlightRef.current = false
+    }
+  }, [noteId])
+
+  const saveBody = useCallback(
+    (newBody: string) => {
+      pendingBodySaveRef.current = newBody
+      void flushBodySave()
+    },
+    [flushBodySave]
+  )
+
   function handleTitleChange(e: React.ChangeEvent<HTMLInputElement>) {
     setTitle(e.target.value)
-    save(e.target.value, body)
+    saveTitle(e.target.value)
   }
 
   async function handleArchive() {
@@ -111,10 +164,12 @@ export function NoteEditor({ noteId }: Props) {
       <div data-testid="note-body">
         <MarkdownEditor
           value={body}
+          syncRevision={bodySyncRevision}
           incomingHighlightRanges={incomingHighlights}
           onChange={(val) => {
             setBody(val)
-            save(title, val)
+            currentBodyRef.current = val
+            saveBody(val)
           }}
         />
       </div>

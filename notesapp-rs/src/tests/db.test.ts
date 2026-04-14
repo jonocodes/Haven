@@ -1,311 +1,196 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { NotesDB } from '../lib/db'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { getTextFromBodyState, mergeBodyStates, replaceBodyText } from '../lib/crdt'
 import type { Note } from '../lib/notes'
+import {
+  applyBodyUpdate,
+  applyRemoteNote,
+  applyRemoteTombstone,
+  archiveNote,
+  clearPendingDelete,
+  createNote,
+  deleteNote,
+  getBodyCrdtState,
+  getBodyText,
+  getDirtyNotes,
+  getNote,
+  getPendingDeletes,
+  getSetting,
+  getSyncMeta,
+  listNotes,
+  markSynced,
+  setSetting,
+  updateNote,
+  updateNoteTitle,
+} from '../lib/db'
+import { getRxCollections, resetRxDbForTests } from '../lib/rxdb'
 
-let db: NotesDB
-let dbId = 0
+describe('db facade', () => {
+  beforeEach(async () => {
+    await resetRxDbForTests()
+  })
 
-beforeEach(() => {
-  // Unique name per test → fully isolated fake-indexeddb store
-  db = new NotesDB(`test-db-${++dbId}`)
-})
+  afterEach(async () => {
+    await resetRxDbForTests()
+  })
 
-afterEach(async () => {
-  await db.delete()
-  db.close()
-})
-
-// ─── helpers ─────────────────────────────────────────────────────────────────
-
-async function addNote(overrides: Partial<Note> = {}): Promise<Note> {
-  const note: Note = {
-    id: crypto.randomUUID(),
-    title: 'Test note',
-    body: 'Test body',
-    updatedAt: new Date().toISOString(),
-    ...overrides,
+  async function createSeedNote(overrides: Partial<Note> = {}): Promise<Note> {
+    const note = await createNote(overrides.title ?? 'Test note', overrides.body ?? 'Test body')
+    if (overrides.title !== undefined || overrides.body !== undefined) {
+      await updateNote(note.id, {
+        ...(overrides.title !== undefined ? { title: overrides.title } : {}),
+        ...(overrides.body !== undefined ? { body: overrides.body } : {}),
+      })
+      await markSynced(note.id)
+    }
+    if (overrides.archived) {
+      await archiveNote(note.id)
+      await markSynced(note.id)
+    }
+    if (overrides.updatedAt) {
+      await applyRemoteNote({ ...(await getNote(note.id))!, updatedAt: overrides.updatedAt })
+    }
+    return (await getNote(note.id))!
   }
-  await db.notes.add(note)
-  await db.syncMeta.add({ noteId: note.id, isDirty: true })
-  return note
-}
 
-// ─── createNote ──────────────────────────────────────────────────────────────
+  it('createNote stores split meta/content docs and dirty sync metadata', async () => {
+    const note = await createNote('Hello', 'World')
+    const collections = await getRxCollections()
+    const [metaDoc, contentDoc, syncMeta] = await Promise.all([
+      collections.notesMeta.findOne(note.id).exec(),
+      collections.notesContent.findOne(note.id).exec(),
+      getSyncMeta(note.id),
+    ])
 
-describe('createNote', () => {
-  it('stores note with correct fields', async () => {
-    const note = await addNote({ title: 'Hello', body: 'World' })
-    const stored = await db.notes.get(note.id)
-    expect(stored?.title).toBe('Hello')
-    expect(stored?.body).toBe('World')
-    expect(stored?.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}/)
-    expect(stored?.archived).toBeUndefined()
+    expect(metaDoc?.title).toBe('Hello')
+    expect(contentDoc?.plainText).toBe('World')
+    expect(syncMeta?.isDirty).toBe(true)
   })
 
-  it('creates syncMeta with isDirty = true', async () => {
-    const note = await addNote()
-    const meta = await db.syncMeta.get(note.id)
-    expect(meta?.isDirty).toBe(true)
+  it('getNote joins metadata and content into the public Note shape', async () => {
+    const note = await createNote('Joined', 'Body text')
+    expect(await getNote(note.id)).toMatchObject({
+      id: note.id,
+      title: 'Joined',
+      body: 'Body text',
+    })
   })
 
-  it('generates distinct ids for two notes', async () => {
-    const a = await addNote()
-    const b = await addNote()
-    expect(a.id).not.toBe(b.id)
-  })
-})
+  it('listNotes orders by updatedAt descending and excludes archived by default', async () => {
+    const a = await createSeedNote({ title: 'A', updatedAt: '2024-01-01T00:00:00.000Z' })
+    const b = await createSeedNote({ title: 'B', updatedAt: '2024-06-01T00:00:00.000Z' })
+    const archived = await createSeedNote({ title: 'Archived', archived: true, updatedAt: '2024-12-01T00:00:00.000Z' })
 
-// ─── updateNote ──────────────────────────────────────────────────────────────
+    const visible = await listNotes()
+    const all = await listNotes(true)
 
-describe('updateNote', () => {
-  it('updates title and body', async () => {
-    const note = await addNote({ title: 'Old', body: 'Old body' })
-    await db.notes.update(note.id, { title: 'New', body: 'New body', updatedAt: new Date().toISOString() })
-    const stored = await db.notes.get(note.id)
-    expect(stored?.title).toBe('New')
-    expect(stored?.body).toBe('New body')
+    expect(visible.map((note) => note.id)).toEqual([b.id, a.id])
+    expect(all.map((note) => note.id)).toContain(archived.id)
   })
 
-  it('updates updatedAt to a newer timestamp', async () => {
-    const note = await addNote({ updatedAt: '2024-01-01T00:00:00.000Z' })
-    await db.notes.update(note.id, { updatedAt: '2025-01-01T00:00:00.000Z' })
-    const stored = await db.notes.get(note.id)
-    expect(stored?.updatedAt > note.updatedAt).toBe(true)
+  it('updateNote and title/body helpers update the note body facade and CRDT placeholder', async () => {
+    const note = await createNote('Old title', 'Old body')
+    await updateNoteTitle(note.id, 'New title')
+    await applyBodyUpdate(note.id, 'New body')
+
+    expect(await getBodyText(note.id)).toBe('New body')
+    expect(getTextFromBodyState((await getBodyCrdtState(note.id))!)).toBe('New body')
+    expect(await getNote(note.id)).toMatchObject({
+      title: 'New title',
+      body: 'New body',
+    })
   })
 
-  it('sets isDirty = true', async () => {
-    const note = await addNote()
-    await db.syncMeta.update(note.id, { isDirty: false })
-    await db.syncMeta.update(note.id, { isDirty: true })
-    expect((await db.syncMeta.get(note.id))?.isDirty).toBe(true)
+  it('applyRemoteNote merges concurrent body changes by CRDT state', async () => {
+    const local = await createNote('Shared', 'alpha')
+    const localState = await getBodyCrdtState(local.id)
+    await applyBodyUpdate(local.id, 'alpha local')
+
+    await applyRemoteNote({
+      id: local.id,
+      title: 'Shared',
+      body: 'alpha remote',
+      updatedAt: local.updatedAt,
+      crdtState: (() => {
+        return replaceBodyText(localState!, 'alpha remote')
+      })(),
+    })
+
+    const merged = await getNote(local.id)
+    expect(merged?.body).toContain('alpha')
+    expect(merged?.body).toContain('local')
+    expect(merged?.body).toContain('remote')
   })
 
-  it('clears syncError', async () => {
-    const note = await addNote()
-    await db.syncMeta.update(note.id, { syncError: 'previous error' })
-    await db.syncMeta.update(note.id, { syncError: undefined })
-    expect((await db.syncMeta.get(note.id))?.syncError).toBeUndefined()
-  })
-})
+  it('mergeBodyStates is deterministic for overlapping insert/delete edits', () => {
+    const base = replaceBodyText(undefined, 'alpha beta')
+    const deleteState = replaceBodyText(base, 'alpha ')
+    const insertState = replaceBodyText(base, 'alpha Xbeta')
 
-// ─── archiveNote ─────────────────────────────────────────────────────────────
+    const mergedDeleteFirst = mergeBodyStates(deleteState, insertState)
+    const mergedInsertFirst = mergeBodyStates(insertState, deleteState)
 
-describe('archiveNote', () => {
-  it('sets archived = true', async () => {
-    const note = await addNote()
-    await db.notes.update(note.id, { archived: true, updatedAt: new Date().toISOString() })
-    expect((await db.notes.get(note.id))?.archived).toBe(true)
+    expect(getTextFromBodyState(mergedDeleteFirst)).toBe('alpha X')
+    expect(getTextFromBodyState(mergedInsertFirst)).toBe('alpha X')
+    expect(mergedDeleteFirst).toBe(mergedInsertFirst)
   })
 
-  it('sets isDirty = true on syncMeta', async () => {
-    const note = await addNote()
-    await db.syncMeta.update(note.id, { isDirty: false })
-    await db.syncMeta.update(note.id, { isDirty: true })
-    expect((await db.syncMeta.get(note.id))?.isDirty).toBe(true)
-  })
-})
+  it('applyRemoteNote keeps the note dirty when merged content still contains local-only changes', async () => {
+    const note = await createNote('Shared', 'alpha')
+    const baseState = await getBodyCrdtState(note.id)
+    await applyBodyUpdate(note.id, 'alpha local')
 
-// ─── deleteNote ──────────────────────────────────────────────────────────────
+    await applyRemoteNote({
+      id: note.id,
+      title: 'Shared',
+      body: 'alpha remote',
+      updatedAt: note.updatedAt,
+      crdtState: replaceBodyText(baseState!, 'alpha remote'),
+    })
 
-describe('deleteNote', () => {
-  it('removes note from db.notes', async () => {
-    const note = await addNote()
-    await db.notes.delete(note.id)
-    expect(await db.notes.get(note.id)).toBeUndefined()
-  })
-
-  it('removes entry from db.syncMeta', async () => {
-    const note = await addNote()
-    await db.syncMeta.delete(note.id)
-    expect(await db.syncMeta.get(note.id)).toBeUndefined()
+    expect((await getSyncMeta(note.id))?.isDirty).toBe(true)
   })
 
-  it('adds noteId to db.pendingDeletes', async () => {
-    const note = await addNote()
-    await db.pendingDeletes.put({ noteId: note.id })
-    const rows = await db.pendingDeletes.toArray()
-    expect(rows.map((r) => r.noteId)).toContain(note.id)
-  })
-})
+  it('deleteNote removes split docs and records a pending tombstone', async () => {
+    const note = await createNote('To delete', 'Body')
+    await deleteNote(note.id)
 
-// ─── pendingDeletes ───────────────────────────────────────────────────────────
-
-describe('pendingDeletes', () => {
-  it('returns all noteIds', async () => {
-    await db.pendingDeletes.put({ noteId: 'a' })
-    await db.pendingDeletes.put({ noteId: 'b' })
-    const rows = await db.pendingDeletes.toArray()
-    expect(rows.map((r) => r.noteId)).toEqual(expect.arrayContaining(['a', 'b']))
+    expect(await getNote(note.id)).toBeUndefined()
+    expect(await getPendingDeletes()).toContain(note.id)
   })
 
-  it('clears a specific noteId without affecting others', async () => {
-    await db.pendingDeletes.put({ noteId: 'a' })
-    await db.pendingDeletes.put({ noteId: 'b' })
-    await db.pendingDeletes.delete('a')
-    const rows = await db.pendingDeletes.toArray()
-    expect(rows.map((r) => r.noteId)).not.toContain('a')
-    expect(rows.map((r) => r.noteId)).toContain('b')
-  })
-})
+  it('applyRemoteTombstone removes the note and clears pending deletes', async () => {
+    const note = await createNote('Remote tombstone', 'Body')
+    await deleteNote(note.id)
+    await applyRemoteTombstone(note.id)
 
-// ─── listNotes ────────────────────────────────────────────────────────────────
-
-describe('listNotes', () => {
-  it('returns notes ordered by updatedAt descending', async () => {
-    const a = await addNote({ updatedAt: '2024-01-01T00:00:00.000Z' })
-    const b = await addNote({ updatedAt: '2024-06-01T00:00:00.000Z' })
-    const c = await addNote({ updatedAt: '2024-03-01T00:00:00.000Z' })
-    const all = await db.notes.orderBy('updatedAt').reverse().toArray()
-    expect(all[0]?.id).toBe(b.id)
-    expect(all[1]?.id).toBe(c.id)
-    expect(all[2]?.id).toBe(a.id)
+    expect(await getNote(note.id)).toBeUndefined()
+    expect(await getPendingDeletes()).not.toContain(note.id)
   })
 
-  it('excludes archived notes by default', async () => {
-    const active = await addNote()
-    const archived = await addNote({ archived: true })
-    const visible = (await db.notes.orderBy('updatedAt').reverse().toArray()).filter((n) => !n.archived)
-    expect(visible.map((n) => n.id)).toContain(active.id)
-    expect(visible.map((n) => n.id)).not.toContain(archived.id)
+  it('getDirtyNotes only returns notes whose sync metadata is dirty', async () => {
+    const dirty = await createNote('Dirty', 'Body')
+    const clean = await createNote('Clean', 'Body')
+    await markSynced(clean.id)
+
+    const dirtyNotes = await getDirtyNotes()
+    expect(dirtyNotes.map((note) => note.id)).toContain(dirty.id)
+    expect(dirtyNotes.map((note) => note.id)).not.toContain(clean.id)
   })
 
-  it('includes archived notes when requested', async () => {
-    const archived = await addNote({ archived: true })
-    const all = await db.notes.toArray()
-    expect(all.map((n) => n.id)).toContain(archived.id)
+  it('settings store and retrieve values', async () => {
+    await setSetting('foo', 'bar')
+    expect(await getSetting('foo')).toBe('bar')
   })
 
-  it('returns empty array when no notes exist', async () => {
-    expect(await db.notes.toArray()).toHaveLength(0)
-  })
-})
+  it('clearPendingDelete removes only the specified tombstone', async () => {
+    const a = await createNote('A', 'Body')
+    const b = await createNote('B', 'Body')
+    await deleteNote(a.id)
+    await deleteNote(b.id)
 
-// ─── getNote ──────────────────────────────────────────────────────────────────
+    await clearPendingDelete(a.id)
 
-describe('getNote', () => {
-  it('returns the note by id', async () => {
-    const note = await addNote({ title: 'Find me' })
-    expect((await db.notes.get(note.id))?.title).toBe('Find me')
-  })
-
-  it('returns undefined for unknown id', async () => {
-    expect(await db.notes.get('no-such-id')).toBeUndefined()
-  })
-})
-
-// ─── getSyncMeta ──────────────────────────────────────────────────────────────
-
-describe('getSyncMeta', () => {
-  it('returns syncMeta by noteId', async () => {
-    const note = await addNote()
-    expect((await db.syncMeta.get(note.id))?.noteId).toBe(note.id)
-  })
-
-  it('returns undefined for unknown noteId', async () => {
-    expect(await db.syncMeta.get('no-such-id')).toBeUndefined()
-  })
-})
-
-// ─── markSynced ───────────────────────────────────────────────────────────────
-
-describe('markSynced', () => {
-  it('sets isDirty = false', async () => {
-    const note = await addNote()
-    await db.syncMeta.update(note.id, { isDirty: false, lastConfirmedSyncAt: new Date().toISOString() })
-    expect((await db.syncMeta.get(note.id))?.isDirty).toBe(false)
-  })
-
-  it('sets lastConfirmedSyncAt', async () => {
-    const note = await addNote()
-    const before = new Date().toISOString()
-    await db.syncMeta.update(note.id, { lastConfirmedSyncAt: new Date().toISOString() })
-    expect((await db.syncMeta.get(note.id))?.lastConfirmedSyncAt! >= before).toBe(true)
-  })
-
-  it('clears syncError', async () => {
-    const note = await addNote()
-    await db.syncMeta.update(note.id, { syncError: 'oops' })
-    await db.syncMeta.update(note.id, { isDirty: false, syncError: undefined })
-    expect((await db.syncMeta.get(note.id))?.syncError).toBeUndefined()
-  })
-})
-
-// ─── markSyncAttempted ────────────────────────────────────────────────────────
-
-describe('markSyncAttempted', () => {
-  it('sets lastAttemptedSyncAt', async () => {
-    const note = await addNote()
-    const before = new Date().toISOString()
-    await db.syncMeta.update(note.id, { lastAttemptedSyncAt: new Date().toISOString() })
-    expect((await db.syncMeta.get(note.id))?.lastAttemptedSyncAt! >= before).toBe(true)
-  })
-
-  it('does not change isDirty', async () => {
-    const note = await addNote()
-    await db.syncMeta.update(note.id, { lastAttemptedSyncAt: new Date().toISOString() })
-    expect((await db.syncMeta.get(note.id))?.isDirty).toBe(true)
-  })
-})
-
-// ─── markSyncError ────────────────────────────────────────────────────────────
-
-describe('markSyncError', () => {
-  it('sets syncError string', async () => {
-    const note = await addNote()
-    await db.syncMeta.update(note.id, { syncError: 'network error', lastAttemptedSyncAt: new Date().toISOString() })
-    expect((await db.syncMeta.get(note.id))?.syncError).toBe('network error')
-  })
-
-  it('sets lastAttemptedSyncAt', async () => {
-    const note = await addNote()
-    const before = new Date().toISOString()
-    await db.syncMeta.update(note.id, { syncError: 'err', lastAttemptedSyncAt: new Date().toISOString() })
-    expect((await db.syncMeta.get(note.id))?.lastAttemptedSyncAt! >= before).toBe(true)
-  })
-
-  it('does not set isDirty = false', async () => {
-    const note = await addNote()
-    await db.syncMeta.update(note.id, { syncError: 'err' })
-    expect((await db.syncMeta.get(note.id))?.isDirty).toBe(true)
-  })
-})
-
-// ─── getDirtyNotes ────────────────────────────────────────────────────────────
-
-describe('getDirtyNotes', () => {
-  it('only includes notes with isDirty = true', async () => {
-    const dirty = await addNote()
-    const clean = await addNote()
-    await db.syncMeta.update(clean.id, { isDirty: false })
-    const allMeta = await db.syncMeta.toArray()
-    const dirtyIds = allMeta.filter((m) => m.isDirty).map((m) => m.noteId)
-    expect(dirtyIds).toContain(dirty.id)
-    expect(dirtyIds).not.toContain(clean.id)
-  })
-
-  it('returns empty when all notes are clean', async () => {
-    const note = await addNote()
-    await db.syncMeta.update(note.id, { isDirty: false })
-    const allMeta = await db.syncMeta.toArray()
-    expect(allMeta.filter((m) => m.isDirty)).toHaveLength(0)
-  })
-})
-
-// ─── settings ─────────────────────────────────────────────────────────────────
-
-describe('settings', () => {
-  it('stores and retrieves a key-value pair', async () => {
-    await db.settings.put({ key: 'foo', value: 'bar' })
-    expect((await db.settings.get('foo'))?.value).toBe('bar')
-  })
-
-  it('returns undefined for unknown key', async () => {
-    expect(await db.settings.get('missing')).toBeUndefined()
-  })
-
-  it('overwrites existing key', async () => {
-    await db.settings.put({ key: 'k', value: 'v1' })
-    await db.settings.put({ key: 'k', value: 'v2' })
-    expect((await db.settings.get('k'))?.value).toBe('v2')
+    expect(await getPendingDeletes()).not.toContain(a.id)
+    expect(await getPendingDeletes()).toContain(b.id)
   })
 })
