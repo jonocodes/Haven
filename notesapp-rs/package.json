@@ -1,0 +1,36 @@
+{
+  "name": "notesapp-rs",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bunx tsr generate && vite",
+    "build": "bunx tsr generate && vite build",
+    "generate-routes": "bunx tsr generate"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.2.2",
+    "@tanstack/router-cli": "^1.166.33",
+    "@tanstack/router-plugin": "^1.167.22",
+    "@types/bun": "latest",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "vite": "^8.0.8"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.99.0",
+    "@tanstack/react-router": "^1.168.21",
+    "autoprefixer": "^10.5.0",
+    "dexie": "^4.4.2",
+    "dexie-react-hooks": "^1.1.7",
+    "postcss": "^8.5.9",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "remotestoragejs": "^2.0.0-beta.8",
+    "tailwindcss": "^4.2.2"
+  }
+}
