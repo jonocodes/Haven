@@ -65,7 +65,7 @@ notesapp-rs/
 ### 4. remoteStorage Integration
 - [x] Initialize remotestorage.js client
 - [x] Connect button UI (enter remoteStorage address/provider)
-- [ ] Handle OAuth redirect flow (remoteStorage auth) — handled by remotestoragejs internally
+- [x] Handle OAuth redirect flow (remoteStorage auth) — handled by remotestoragejs widget internally
 - [x] Define storage layout per spec:
   ```
   /notes-app/
@@ -122,7 +122,7 @@ notesapp-rs/
 
 ## Future Considerations (not for v1)
 - CRDT
-* Filter by text
+- [x] Filter by text (implemented in note list)
 - Conflict resolution UI
 - Device-specific directories for per-device state
 

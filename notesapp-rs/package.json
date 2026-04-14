@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "bunx tsr generate && vite",
     "build": "bunx tsr generate && vite build",
-    "generate-routes": "bunx tsr generate"
+    "generate-routes": "bunx tsr generate",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.2",
@@ -16,7 +19,11 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
-    "vite": "^8.0.8"
+    "@vitest/coverage-v8": "^4.1.4",
+    "fake-indexeddb": "^6.2.5",
+    "happy-dom": "^20.9.0",
+    "vite": "^8.0.8",
+    "vitest": "^4.1.4"
   },
   "peerDependencies": {
     "typescript": "^5"

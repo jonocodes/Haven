@@ -10,14 +10,14 @@ interface PendingDelete {
   noteId: string
 }
 
-class NotesDB extends Dexie {
+export class NotesDB extends Dexie {
   notes!: Table<Note, string>
   syncMeta!: Table<SyncMetadata, string>
   settings!: Table<Setting, string>
   pendingDeletes!: Table<PendingDelete, string>
 
-  constructor() {
-    super('notesapp')
+  constructor(name = 'notesapp') {
+    super(name)
     this.version(1).stores({
       notes: 'id, updatedAt, archived',
       syncMeta: 'noteId',
@@ -41,6 +41,10 @@ class NotesDB extends Dexie {
 }
 
 export const db = new NotesDB()
+
+export function getDb(): NotesDB {
+  return db
+}
 
 export async function createNote(title: string, body: string): Promise<Note> {
   const note: Note = {

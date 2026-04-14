@@ -1,4 +1,4 @@
-import { db, getDirtyNotes, markSynced, markSyncAttempted, markSyncError, getNote, setSetting, getPendingDeletes, clearPendingDelete } from './db'
+import { getDb, getDirtyNotes, markSynced, markSyncAttempted, markSyncError, getNote, setSetting, getPendingDeletes, clearPendingDelete } from './db'
 import { pushNote, pullAllNotes, isConnected, pushTombstone, listRemoteTombstoneIds } from './remotestorage'
 import type { Note } from './notes'
 
@@ -40,20 +40,20 @@ export async function pullAndMerge(): Promise<void> {
   for (const remote of remoteNotes) {
     const local = await getNote(remote.id)
     if (!local) {
-      await db.notes.add(remote)
-      await db.syncMeta.add({ noteId: remote.id, isDirty: false, lastConfirmedSyncAt: new Date().toISOString() })
+      await getDb().notes.add(remote)
+      await getDb().syncMeta.add({ noteId: remote.id, isDirty: false, lastConfirmedSyncAt: new Date().toISOString() })
     } else if (remote.updatedAt > local.updatedAt) {
       // latest updatedAt wins
-      await db.notes.put(remote)
-      await db.syncMeta.update(remote.id, { isDirty: false, lastConfirmedSyncAt: new Date().toISOString(), syncError: undefined })
+      await getDb().notes.put(remote)
+      await getDb().syncMeta.update(remote.id, { isDirty: false, lastConfirmedSyncAt: new Date().toISOString(), syncError: undefined })
     }
   }
   // Apply tombstones from remote
   const tombstoneIds = await listRemoteTombstoneIds()
   for (const id of tombstoneIds) {
-    await db.notes.delete(id)
-    await db.syncMeta.delete(id)
-    await db.pendingDeletes.delete(id) // in case we also had it pending locally
+    await getDb().notes.delete(id)
+    await getDb().syncMeta.delete(id)
+    await getDb().pendingDeletes.delete(id) // in case we also had it pending locally
   }
 
   await setSetting('lastPullAt', new Date().toISOString())
