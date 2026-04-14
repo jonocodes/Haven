@@ -8,6 +8,7 @@ import {
   livePreviewPlugin,
   markdownStylePlugin,
   editorTheme,
+  imageField,
   linkPlugin,
 } from 'codemirror-live-markdown'
 
@@ -86,6 +87,7 @@ export function MarkdownEditor({ value, onChange, incomingHighlightRanges = [] }
         markdown({ extensions: [Table] }),
         livePreviewPlugin,
         markdownStylePlugin,
+        imageField(),
         linkPlugin(),
         editorTheme,
         baseTheme,

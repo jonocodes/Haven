@@ -220,17 +220,31 @@ export class RsServer {
 
   private listDir(prefix: string, res: ServerResponse, headOnly: boolean) {
     const items: Record<string, { ETag: string; 'Content-Type': string; 'Content-Length': number }> = {}
+    const childDirs = new Set<string>()
 
     for (const [k, v] of this.storage.entries()) {
       if (!k.startsWith(prefix)) continue
       const rel = k.slice(prefix.length)
-      // Only immediate children (no slashes in rel)
-      if (rel.length > 0 && !rel.includes('/')) {
+      if (rel.length === 0) continue
+
+      const slash = rel.indexOf('/')
+      if (slash === -1) {
         items[rel] = {
           ETag: v.etag,
           'Content-Type': v.contentType,
           'Content-Length': v.content.length,
         }
+        continue
+      }
+
+      childDirs.add(`${rel.slice(0, slash)}/`)
+    }
+
+    for (const dir of childDirs) {
+      items[dir] = {
+        ETag: `"dir-${prefix}${dir}"`,
+        'Content-Type': 'application/ld+json',
+        'Content-Length': 0,
       }
     }
 
@@ -240,6 +254,7 @@ export class RsServer {
     })
 
     res.setHeader('Content-Type', 'application/ld+json')
+    res.setHeader('ETag', `"${Buffer.from(body).toString('base64')}"`)
     res.setHeader('Content-Length', Buffer.byteLength(body))
     res.writeHead(200)
     res.end(headOnly ? undefined : body)

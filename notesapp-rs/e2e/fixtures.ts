@@ -40,15 +40,9 @@ export const test = base.extend<Fixtures>({
         page.keyboard.press('Enter'),
       ])
 
-      // After OAuth redirect we're back at the app — wait for RS to mark connected
-      // (the widget adds a class or the root component sets connected state)
-      await page.waitForFunction(
-        () => {
-          const w = document.getElementById('remotestorage-widget')
-          return w?.className?.includes('connected') || w?.dataset?.['state'] === 'connected'
-        },
-        { timeout: 10000 }
-      )
+      // The app exposes its own connection state in the status bar once the
+      // remoteStorage `connected` event fires.
+      await page.locator('.fixed.bottom-0.left-0').getByText('↑').waitFor({ timeout: 10000 })
     }
 
     await use(connect)
