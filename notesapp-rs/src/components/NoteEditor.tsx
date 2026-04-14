@@ -5,6 +5,7 @@ import { db, updateNote, archiveNote, deleteNote } from '../lib/db'
 import { schedulePush, pushDirtyNotes } from '../lib/sync'
 import { SyncStatus } from './SyncStatus'
 import { MarkdownEditor } from './MarkdownEditor'
+import { computeInsertedWordHighlights, type TextRange } from '../lib/diffHighlights'
 
 interface Props {
   noteId: string
@@ -16,22 +17,30 @@ export function NoteEditor({ noteId }: Props) {
   const meta = useLiveQuery(() => db.syncMeta.get(noteId), [noteId])
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
+  const [incomingHighlights, setIncomingHighlights] = useState<TextRange[]>([])
+  const [hasLoaded, setHasLoaded] = useState(false)
 
   // Initial load
   useEffect(() => {
     if (note) {
       setTitle(note.title)
       setBody(note.body)
+      setHasLoaded(true)
     }
   }, [note?.id])
 
   // Apply remote changes — only when not dirty (safe to overwrite local state)
   useEffect(() => {
-    if (note && meta && !meta.isDirty) {
+    if (note && meta && !meta.isDirty && hasLoaded) {
+      if (note.body !== body) {
+        setIncomingHighlights(computeInsertedWordHighlights(body, note.body))
+      } else {
+        setIncomingHighlights([])
+      }
       setTitle(note.title)
       setBody(note.body)
     }
-  }, [note?.updatedAt])
+  }, [note?.updatedAt, meta?.isDirty, hasLoaded])
 
   const save = useCallback(
     async (newTitle: string, newBody: string) => {
@@ -44,11 +53,6 @@ export function NoteEditor({ noteId }: Props) {
   function handleTitleChange(e: React.ChangeEvent<HTMLInputElement>) {
     setTitle(e.target.value)
     save(e.target.value, body)
-  }
-
-  function handleBodyChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    setBody(e.target.value)
-    save(title, e.target.value)
   }
 
   async function handleArchive() {
@@ -105,7 +109,14 @@ export function NoteEditor({ noteId }: Props) {
       />
 
       <div data-testid="note-body">
-        <MarkdownEditor value={body} onChange={(val) => { setBody(val); save(title, val) }} />
+        <MarkdownEditor
+          value={body}
+          incomingHighlightRanges={incomingHighlights}
+          onChange={(val) => {
+            setBody(val)
+            save(title, val)
+          }}
+        />
       </div>
 
       <div className="flex gap-4 mt-4 pt-4 border-t border-gray-100">

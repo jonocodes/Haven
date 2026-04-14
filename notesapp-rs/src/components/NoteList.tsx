@@ -1,12 +1,15 @@
-import { useState } from 'react'
+import { type ChangeEvent, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { db, createNote } from '../lib/db'
 import { SyncStatus } from './SyncStatus'
+import { parseMarkdownToNote } from '../lib/importMarkdown'
 
 export function NoteList() {
   const [query, setQuery] = useState('')
+  const [importError, setImportError] = useState<string | null>(null)
   const navigate = useNavigate()
+  const importInputRef = useRef<HTMLInputElement>(null)
 
   const notes = useLiveQuery(
     () => db.notes.orderBy('updatedAt').reverse().filter((n) => !n.archived).toArray(),
@@ -25,18 +28,65 @@ export function NoteList() {
     navigate({ to: '/notes/$id', params: { id: note.id } })
   }
 
+  async function handleImportFiles(e: ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+
+    setImportError(null)
+
+    try {
+      let firstImportedId: string | null = null
+
+      for (const file of Array.from(files)) {
+        const content = await file.text()
+        const parsed = parseMarkdownToNote(content, file.name)
+        const note = await createNote(parsed.title, parsed.body)
+        if (!firstImportedId) firstImportedId = note.id
+      }
+
+      if (firstImportedId) {
+        navigate({ to: '/notes/$id', params: { id: firstImportedId } })
+      }
+    } catch (err) {
+      setImportError(`Failed to import markdown file(s): ${String(err)}`)
+    } finally {
+      e.target.value = ''
+    }
+  }
+
   return (
     <div className="max-w-xl mx-auto p-4">
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-2xl font-semibold">Notes</h1>
-        <button
-          data-testid="new-note-btn"
-          onClick={handleNew}
-          className="bg-blue-500 text-white px-4 py-1.5 rounded hover:bg-blue-600 text-sm"
-        >
-          New note
-        </button>
+        <div className="flex items-center gap-2">
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".md,.markdown,text/markdown,text/plain"
+            multiple
+            onChange={handleImportFiles}
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => importInputRef.current?.click()}
+            className="border border-gray-300 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-50 text-sm"
+          >
+            Upload .md
+          </button>
+          <button
+            data-testid="new-note-btn"
+            onClick={handleNew}
+            className="bg-blue-500 text-white px-4 py-1.5 rounded hover:bg-blue-600 text-sm"
+          >
+            New note
+          </button>
+        </div>
       </div>
+
+      {importError && (
+        <p className="mb-3 text-xs text-red-600">{importError}</p>
+      )}
 
       <input
         data-testid="search-input"

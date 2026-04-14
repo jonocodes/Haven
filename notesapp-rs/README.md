@@ -12,6 +12,10 @@ See [spec](../docs/lite/haven_lite_remotestorage_notes_spec.md) for full design 
 - **Sync backend**: remotestorage.js
 - **Styling**: Tailwind CSS v4
 
+## RxDB + CRDT migration
+
+There is a concrete migration plan for moving from Dexie to RxDB + CRDT (with ntfy intentionally deferred) in [`RXDB_MIGRATION.md`](./RXDB_MIGRATION.md).
+
 ## Running
 
 ```sh
@@ -32,5 +36,7 @@ Output goes to `dist/`.
 ## Usage
 
 The app works fully offline — no login required. Notes are stored locally in IndexedDB.
+
+You can also import one or more Markdown files via **Upload .md** on the notes list page.
 
 To sync across devices, click **"Connect remoteStorage to sync your notes"** in the top bar and enter your remoteStorage address (e.g. `user@example.com`). The app will redirect through OAuth and then begin syncing in the background.
