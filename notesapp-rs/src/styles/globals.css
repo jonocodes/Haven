@@ -9,3 +9,17 @@
   left: auto !important;
   z-index: 1000;
 }
+
+@keyframes incoming-change-fade {
+  0% {
+    background-color: rgb(253 224 71 / 0.65);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.cm-incoming-change {
+  border-radius: 3px;
+  animation: incoming-change-fade 4.5s ease-out forwards;
+}

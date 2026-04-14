@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
-import { EditorView, keymap } from '@codemirror/view'
-import { EditorState } from '@codemirror/state'
+import { Decoration, type DecorationSet, EditorView, keymap } from '@codemirror/view'
+import { EditorState, RangeSetBuilder, StateEffect, StateField } from '@codemirror/state'
 import { markdown } from '@codemirror/lang-markdown'
 import { Table } from '@lezer/markdown'
 import { defaultKeymap, historyKeymap, history } from '@codemirror/commands'
@@ -14,7 +14,36 @@ import {
 interface Props {
   value: string
   onChange: (value: string) => void
+  incomingHighlightRanges?: Array<{ from: number; to: number }>
 }
+
+const setIncomingHighlightsEffect = StateEffect.define<Array<{ from: number; to: number }>>()
+const clearIncomingHighlightsEffect = StateEffect.define<void>()
+
+const incomingHighlightsField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none
+  },
+  update(decorations, tr) {
+    let next = decorations.map(tr.changes)
+    for (const effect of tr.effects) {
+      if (effect.is(clearIncomingHighlightsEffect)) {
+        next = Decoration.none
+      }
+      if (effect.is(setIncomingHighlightsEffect)) {
+        const builder = new RangeSetBuilder<Decoration>()
+        for (const range of effect.value) {
+          if (range.to > range.from) {
+            builder.add(range.from, range.to, Decoration.mark({ class: 'cm-incoming-change' }))
+          }
+        }
+        next = builder.finish()
+      }
+    }
+    return next
+  },
+  provide: (field) => EditorView.decorations.from(field),
+})
 
 const baseTheme = EditorView.theme({
   '&': {
@@ -38,10 +67,11 @@ const baseTheme = EditorView.theme({
   },
 })
 
-export function MarkdownEditor({ value, onChange }: Props) {
+export function MarkdownEditor({ value, onChange, incomingHighlightRanges = [] }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
+  const clearTimerRef = useRef<number | null>(null)
   onChangeRef.current = onChange
 
   // Mount editor once
@@ -59,6 +89,7 @@ export function MarkdownEditor({ value, onChange }: Props) {
         linkPlugin(),
         editorTheme,
         baseTheme,
+        incomingHighlightsField,
         EditorView.lineWrapping,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
@@ -88,6 +119,30 @@ export function MarkdownEditor({ value, onChange }: Props) {
       })
     }
   }, [value])
+
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view || incomingHighlightRanges.length === 0) return
+
+    view.dispatch({ effects: setIncomingHighlightsEffect.of(incomingHighlightRanges) })
+
+    if (clearTimerRef.current) {
+      window.clearTimeout(clearTimerRef.current)
+    }
+    clearTimerRef.current = window.setTimeout(() => {
+      view.dispatch({ effects: clearIncomingHighlightsEffect.of(undefined) })
+      clearTimerRef.current = null
+    }, 4500)
+  }, [incomingHighlightRanges])
+
+  useEffect(() => {
+    return () => {
+      if (clearTimerRef.current) {
+        window.clearTimeout(clearTimerRef.current)
+        clearTimerRef.current = null
+      }
+    }
+  }, [])
 
   return <div ref={containerRef} className="w-full" />
 }
