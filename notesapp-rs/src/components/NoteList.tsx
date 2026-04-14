@@ -30,6 +30,7 @@ export function NoteList() {
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-2xl font-semibold">Notes</h1>
         <button
+          data-testid="new-note-btn"
           onClick={handleNew}
           className="bg-blue-500 text-white px-4 py-1.5 rounded hover:bg-blue-600 text-sm"
         >
@@ -38,6 +39,7 @@ export function NoteList() {
       </div>
 
       <input
+        data-testid="search-input"
         type="search"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
@@ -55,10 +57,11 @@ export function NoteList() {
         <p className="text-gray-400 text-sm">No notes match "{query}".</p>
       )}
 
-      <ul className="space-y-2">
+      <ul data-testid="note-list" className="space-y-2">
         {filtered?.map((note) => (
           <li key={note.id}>
             <Link
+              data-testid="note-item"
               to="/notes/$id"
               params={{ id: note.id }}
               className="block border border-gray-200 rounded-lg px-4 py-3 hover:bg-gray-50 transition-colors"

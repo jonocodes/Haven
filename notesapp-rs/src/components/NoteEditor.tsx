@@ -83,6 +83,7 @@ export function NoteEditor({ noteId }: Props) {
     <div className="max-w-xl mx-auto p-4">
       <div className="flex items-center gap-3 mb-4">
         <button
+          data-testid="back-btn"
           onClick={() => navigate({ to: '/' })}
           className="text-sm text-gray-400 hover:text-gray-600"
         >
@@ -95,6 +96,7 @@ export function NoteEditor({ noteId }: Props) {
       </div>
 
       <input
+        data-testid="note-title"
         type="text"
         value={title}
         onChange={handleTitleChange}
@@ -102,16 +104,20 @@ export function NoteEditor({ noteId }: Props) {
         className="w-full text-xl font-semibold border-0 focus:outline-none mb-3 text-gray-900 placeholder-gray-300"
       />
 
-      <MarkdownEditor value={body} onChange={(val) => { setBody(val); save(title, val) }} />
+      <div data-testid="note-body">
+        <MarkdownEditor value={body} onChange={(val) => { setBody(val); save(title, val) }} />
+      </div>
 
       <div className="flex gap-4 mt-4 pt-4 border-t border-gray-100">
         <button
+          data-testid="archive-btn"
           onClick={handleArchive}
           className="text-xs text-gray-400 hover:text-gray-600"
         >
           Archive
         </button>
         <button
+          data-testid="delete-btn"
           onClick={handleDelete}
           className="text-xs text-red-400 hover:text-red-600"
         >
