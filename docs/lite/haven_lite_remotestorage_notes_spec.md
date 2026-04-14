@@ -383,22 +383,6 @@ The sync flow should stay explicit and understandable.
 
 ---
 
-## Future note format: Markdown
-
-Markdown support should be considered a future enhancement.
-
-It does not need to be part of the first experiment, but it should be kept in mind while designing the note model. A good library to use would be https://github.com/blueberrycongee/codemirror-live-markdown
-
-Implications:
-
-- `body` may later contain markdown text
-- note rendering may later distinguish between raw source and rendered view
-- future merge/conflict behavior may be more complex if notes are long markdown documents
-
-This is another reason to keep future CRDT exploration in mind, especially for rarely connected devices editing longer notes.
-
----
-
 ## Questions this experiment should answer
 
 - does the remoteStorage login flow feel good enough for normal users?

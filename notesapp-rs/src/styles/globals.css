@@ -1,1 +1,11 @@
 @import "tailwindcss";
+
+/* Pin remoteStorage widget to bottom-right */
+#remotestorage-widget {
+  position: fixed !important;
+  bottom: 0 !important;
+  right: 0 !important;
+  top: auto !important;
+  left: auto !important;
+  z-index: 1000;
+}

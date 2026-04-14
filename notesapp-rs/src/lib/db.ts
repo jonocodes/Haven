@@ -1,9 +1,20 @@
 import Dexie, { type Table } from 'dexie'
 import type { Note, SyncMetadata } from './notes'
 
+interface Setting {
+  key: string
+  value: string
+}
+
+interface PendingDelete {
+  noteId: string
+}
+
 class NotesDB extends Dexie {
   notes!: Table<Note, string>
   syncMeta!: Table<SyncMetadata, string>
+  settings!: Table<Setting, string>
+  pendingDeletes!: Table<PendingDelete, string>
 
   constructor() {
     super('notesapp')
@@ -14,6 +25,17 @@ class NotesDB extends Dexie {
     this.version(2).stores({
       notes: 'id, updatedAt',
       syncMeta: 'noteId',
+    })
+    this.version(3).stores({
+      notes: 'id, updatedAt',
+      syncMeta: 'noteId',
+      settings: 'key',
+    })
+    this.version(4).stores({
+      notes: 'id, updatedAt',
+      syncMeta: 'noteId',
+      settings: 'key',
+      pendingDeletes: 'noteId',
     })
   }
 }
@@ -49,6 +71,16 @@ export async function archiveNote(id: string): Promise<void> {
 export async function deleteNote(id: string): Promise<void> {
   await db.notes.delete(id)
   await db.syncMeta.delete(id)
+  await db.pendingDeletes.put({ noteId: id })
+}
+
+export async function getPendingDeletes(): Promise<string[]> {
+  const rows = await db.pendingDeletes.toArray()
+  return rows.map((r) => r.noteId)
+}
+
+export async function clearPendingDelete(noteId: string): Promise<void> {
+  await db.pendingDeletes.delete(noteId)
 }
 
 export async function listNotes(includeArchived = false): Promise<Note[]> {
@@ -78,6 +110,14 @@ export async function markSyncAttempted(noteId: string): Promise<void> {
 
 export async function markSyncError(noteId: string, error: string): Promise<void> {
   await db.syncMeta.update(noteId, { syncError: error, lastAttemptedSyncAt: new Date().toISOString() })
+}
+
+export async function setSetting(key: string, value: string): Promise<void> {
+  await db.settings.put({ key, value })
+}
+
+export async function getSetting(key: string): Promise<string | undefined> {
+  return db.settings.get(key).then((s) => s?.value)
 }
 
 export async function getDirtyNotes(): Promise<Array<Note & { meta: SyncMetadata }>> {

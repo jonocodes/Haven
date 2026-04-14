@@ -98,7 +98,6 @@ notesapp-rs/
   - "Sync error" - last sync failed with error
   - "Not yet synced" - never been synced
 - [x] Last edited timestamp display
-- [ ] Optional: Last successful sync timestamp in app shell
 
 ### 7. UX / UI
 - [x] App works fully offline (no blocking on login)
@@ -122,8 +121,8 @@ notesapp-rs/
 - [ ] Verify pull from remoteStorage works
 
 ## Future Considerations (not for v1)
-- Markdown support (consider codemirror-live-markdown)
-- Tags/filtering
+- CRDT
+* Filter by text
 - Conflict resolution UI
 - Device-specific directories for per-device state
 

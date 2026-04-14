@@ -22,14 +22,22 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.10.3",
+    "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/language": "^6.12.3",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/view": "^6.41.0",
+    "@lezer/markdown": "^1.6.3",
     "@tanstack/react-query": "^5.99.0",
     "@tanstack/react-router": "^1.168.21",
     "autoprefixer": "^10.5.0",
+    "codemirror-live-markdown": "^0.5.1-alpha.1",
     "dexie": "^4.4.2",
     "dexie-react-hooks": "^1.1.7",
     "postcss": "^8.5.9",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
+    "remotestorage-widget": "^1.8.1",
     "remotestoragejs": "^2.0.0-beta.8",
     "tailwindcss": "^4.2.2"
   }
