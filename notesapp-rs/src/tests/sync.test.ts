@@ -31,6 +31,7 @@ vi.mock('../lib/notify', () => ({
   subscribeToNoteChanges: vi.fn(),
 }))
 
+
 import * as rs from '../lib/remotestorage'
 import { pullAndMerge, pushDirtyNotes, schedulePush } from '../lib/sync'
 
