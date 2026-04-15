@@ -6,6 +6,8 @@ import { schedulePush, pushDirtyNotes } from '../lib/sync'
 import { SyncStatus } from './SyncStatus'
 import { MarkdownEditor } from './MarkdownEditor'
 import { computeInsertedWordHighlights, type TextRange } from '../lib/diffHighlights'
+import { Button } from './ui/Button'
+import { Input } from './ui/Input'
 
 interface Props {
   noteId: string
@@ -139,26 +141,27 @@ export function NoteEditor({ noteId }: Props) {
   return (
     <div className="max-w-xl mx-auto p-4">
       <div className="flex items-center gap-3 mb-4">
-        <button
+        <Button
           data-testid="back-btn"
           onClick={() => navigate({ to: '/' })}
-          className="text-sm text-gray-400 hover:text-gray-600"
+          variant="link"
         >
           ← Back
-        </button>
+        </Button>
         <div className="ml-auto flex items-center gap-3 text-xs text-gray-400">
           <span>Last edited: {new Date(note.updatedAt).toLocaleString()}</span>
           <SyncStatus noteId={noteId} />
         </div>
       </div>
 
-      <input
+      <Input
         data-testid="note-title"
         type="text"
         value={title}
         onChange={handleTitleChange}
         placeholder="Title"
-        className="w-full text-xl font-semibold border-0 focus:outline-none mb-3 text-gray-900 placeholder-gray-300"
+        variant="title"
+        className="w-full mb-3"
       />
 
       <div data-testid="note-body">
@@ -175,26 +178,29 @@ export function NoteEditor({ noteId }: Props) {
       </div>
 
       <div className="flex gap-4 mt-4 pt-4 border-t border-gray-100">
-        <button
+        <Button
           data-testid="archive-btn"
           onClick={handleArchive}
-          className="text-xs text-gray-400 hover:text-gray-600"
+          variant="ghost"
+          className="text-xs p-0"
         >
           Archive
-        </button>
-        <button
+        </Button>
+        <Button
           data-testid="delete-btn"
           onClick={handleDelete}
-          className="text-xs text-red-400 hover:text-red-600"
+          variant="destructive"
+          className="text-xs p-0"
         >
           Delete
-        </button>
-        <button
+        </Button>
+        <Button
           onClick={handleDownload}
-          className="text-xs text-gray-400 hover:text-gray-600 ml-auto"
+          variant="ghost"
+          className="text-xs p-0 ml-auto"
         >
           Download .md
-        </button>
+        </Button>
       </div>
     </div>
   )
