@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { updateNoteTitle, applyBodyUpdate, archiveNote, deleteNote } from '../lib/db'
-import { useNote, useSyncMeta } from '../lib/dbHooks'
+import { useNote, useSetting, useSyncMeta } from '../lib/dbHooks'
 import { schedulePush, pushDirtyNotes } from '../lib/sync'
 import { SyncStatus } from './SyncStatus'
 import { MarkdownEditor } from './MarkdownEditor'
@@ -17,6 +17,8 @@ export function NoteEditor({ noteId }: Props) {
   const navigate = useNavigate()
   const note = useNote(noteId)
   const meta = useSyncMeta(noteId)
+  const highlightIncomingSetting = useSetting('highlightIncomingChanges')
+  const highlightIncomingEnabled = highlightIncomingSetting !== 'false'
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [incomingHighlights, setIncomingHighlights] = useState<TextRange[]>([])
@@ -52,7 +54,11 @@ export function NoteEditor({ noteId }: Props) {
       const isRemoteBodyChange = note.body !== previousBody && note.body !== lastLocalBodyRef.current
 
       if (isRemoteBodyChange) {
-        setIncomingHighlights(computeInsertedWordHighlights(previousBody, note.body))
+        if (highlightIncomingEnabled) {
+          setIncomingHighlights(computeInsertedWordHighlights(previousBody, note.body))
+        } else {
+          setIncomingHighlights([])
+        }
         setBodySyncRevision((rev) => rev + 1)
       } else {
         setIncomingHighlights([])
@@ -70,7 +76,7 @@ export function NoteEditor({ noteId }: Props) {
       setBody(note.body)
       currentBodyRef.current = note.body
     }
-  }, [note?.updatedAt, note?.title, note?.body, meta?.isDirty, hasLoaded])
+  }, [note?.updatedAt, note?.title, note?.body, meta?.isDirty, hasLoaded, highlightIncomingEnabled])
 
   const saveTitle = useCallback(
     async (newTitle: string) => {

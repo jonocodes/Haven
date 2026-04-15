@@ -74,6 +74,12 @@ export function NoteList() {
           >
             Upload .md
           </Button>
+          <Link
+            to="/preferences"
+            className="border border-gray-300 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-50 text-sm"
+          >
+            Preferences
+          </Link>
           <Button
             data-testid="new-note-btn"
             onClick={handleNew}

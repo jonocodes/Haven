@@ -21,6 +21,14 @@ vi.mock('../lib/remotestorage', () => ({
   pullAllNotes: vi.fn(),
   pushTombstone: vi.fn(),
   listRemoteTombstoneIds: vi.fn(),
+  pullNote: vi.fn(),
+  hasRemoteTombstone: vi.fn(),
+}))
+
+
+vi.mock('../lib/notify', () => ({
+  publishNoteChanged: vi.fn(),
+  subscribeToNoteChanges: vi.fn(),
 }))
 
 
@@ -34,6 +42,8 @@ beforeEach(async () => {
   vi.mocked(rs.pullAllNotes).mockResolvedValue([])
   vi.mocked(rs.pushTombstone).mockResolvedValue(undefined)
   vi.mocked(rs.listRemoteTombstoneIds).mockResolvedValue([])
+  vi.mocked(rs.pullNote).mockResolvedValue(null)
+  vi.mocked(rs.hasRemoteTombstone).mockResolvedValue(false)
 })
 
 afterEach(async () => {

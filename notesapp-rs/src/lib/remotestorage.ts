@@ -44,7 +44,13 @@ export async function listRemoteNoteIds(): Promise<string[]> {
 export async function pullAllNotes(): Promise<RemoteNote[]> {
   const ids = await listRemoteNoteIds();
   const notes = await Promise.all(ids.map((id) => pullNote(id)));
-  return notes.filter((n): n is Note => n !== null);
+  return notes.filter((n): n is RemoteNote => n !== null);
+}
+
+
+export async function hasRemoteTombstone(id: string): Promise<boolean> {
+  const result = await client().getFile(`${TOMBSTONES_PATH}${id}.json`);
+  return Boolean(result?.data);
 }
 
 export async function pushTombstone(id: string): Promise<void> {

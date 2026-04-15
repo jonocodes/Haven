@@ -11,6 +11,8 @@ const stopSyncLoopMock = vi.fn()
 const onConnectedMock = vi.fn()
 const onDisconnectedMock = vi.fn()
 const onRemoteChangeMock = vi.fn()
+const startNtfyListenerMock = vi.fn()
+const stopNtfyListenerMock = vi.fn()
 
 let connectedAtMount = true
 
@@ -38,11 +40,20 @@ vi.mock('../lib/remotestorage', () => ({
   onRemoteChange: (cb: () => void) => onRemoteChangeMock(cb),
 }))
 
+vi.mock('../lib/notify', () => ({
+  onNtfyPublishCountChange: (cb: (count: number) => void) => {
+    cb(0)
+    return () => {}
+  },
+}))
+
 vi.mock('../lib/sync', () => ({
   pullAndMerge: (...args: unknown[]) => pullAndMergeMock(...args),
   pushDirtyNotes: (...args: unknown[]) => pushDirtyNotesMock(...args),
   startSyncLoop: (...args: unknown[]) => startSyncLoopMock(...args),
   stopSyncLoop: (...args: unknown[]) => stopSyncLoopMock(...args),
+  startNtfyListener: (...args: unknown[]) => startNtfyListenerMock(...args),
+  stopNtfyListener: (...args: unknown[]) => stopNtfyListenerMock(...args),
 }))
 
 describe('Root sync bootstrap', () => {
@@ -61,6 +72,8 @@ describe('Root sync bootstrap', () => {
     onConnectedMock.mockReset()
     onDisconnectedMock.mockReset()
     onRemoteChangeMock.mockReset()
+    startNtfyListenerMock.mockReset()
+    stopNtfyListenerMock.mockReset()
   })
 
   afterEach(() => {
