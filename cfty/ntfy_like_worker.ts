@@ -7,6 +7,8 @@ import { DurableObject } from "cloudflare:workers";
 //   PUT  /:topic     Same as POST
 //   GET  /:topic     Return lightweight stats for a topic
 //   GET  /:topic/sse Subscribe to live SSE events for a topic
+//   GET  /:topic/ws  Subscribe via WebSocket (ntfy web client compatible)
+//   GET  /:topic/auth Check topic authorization
 //
 // Notes:
 // - Live-only: no persistence, no replay/history, no filtering
@@ -56,6 +58,20 @@ type TopicStats = {
     recentPublishes: number;
   };
 };
+
+type SseSubscriber = {
+  kind: "sse";
+  writer: WritableStreamDefaultWriter<Uint8Array>;
+  keepalive?: ReturnType<typeof setInterval>;
+};
+
+type WsSubscriber = {
+  kind: "ws";
+  socket: WebSocket;
+  keepalive?: ReturnType<typeof setInterval>;
+};
+
+type Subscriber = SseSubscriber | WsSubscriber;
 
 function json(data: unknown, init?: ResponseInit): Response {
   return new Response(JSON.stringify(data), {
@@ -146,13 +162,21 @@ function makeId(): string {
   return crypto.randomUUID().replace(/-/g, "");
 }
 
-function parseTopicFromPath(pathname: string): { topic: string; isSse: boolean } | null {
+function parseTopicFromPath(
+  pathname: string,
+): { topic: string; isSse: boolean; isWs: boolean; isAuth: boolean } | null {
   const parts = pathname.split("/").filter(Boolean);
   if (parts.length === 1) {
-    return { topic: parts[0], isSse: false };
+    return { topic: parts[0], isSse: false, isWs: false, isAuth: false };
   }
   if (parts.length === 2 && parts[1] === "sse") {
-    return { topic: parts[0], isSse: true };
+    return { topic: parts[0], isSse: true, isWs: false, isAuth: false };
+  }
+  if (parts.length === 2 && parts[1] === "ws") {
+    return { topic: parts[0], isSse: false, isWs: true, isAuth: false };
+  }
+  if (parts.length === 2 && parts[1] === "auth") {
+    return { topic: parts[0], isSse: false, isWs: false, isAuth: true };
   }
   return null;
 }
@@ -182,83 +206,125 @@ function toSseFrame(eventName: string, payload: unknown, id?: string): string {
   return lines.join("\n");
 }
 
+const CORS_HEADERS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET, POST, PUT, OPTIONS",
+  "access-control-allow-headers": "Authorization, Content-Type, Title, X-Title",
+};
+
+function withCors(response: Response): Response {
+  const res = new Response(response.body, response);
+  for (const [k, v] of Object.entries(CORS_HEADERS)) res.headers.set(k, v);
+  return res;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
+
     if (hasAuthConfigured(env) && !isAuthorized(request, env)) {
-      return unauthorized();
+      return withCors(unauthorized());
     }
 
     const url = new URL(request.url);
 
     if (url.pathname === "/" || url.pathname === "") {
-      return text(
-        [
-          "cfty — Cloudflare-based tiny ntfy-like service",
-          "",
-          "Endpoints:",
-          "  POST /:topic",
-          "  PUT  /:topic",
-          "  GET  /:topic",
-          "  GET  /:topic/sse",
-        ].join("\n"),
+      return withCors(
+        text(
+          [
+            "cfty — Cloudflare-based tiny ntfy-like service",
+            "",
+            "Endpoints:",
+            "  POST /:topic",
+            "  PUT  /:topic",
+            "  GET  /:topic",
+            "  GET  /:topic/sse",
+            "  GET  /:topic/ws",
+          ].join("\n"),
+        ),
       );
     }
 
     const parsed = parseTopicFromPath(url.pathname);
     if (!parsed) {
-      return json({ code: 404, error: "not found" }, { status: 404 });
+      return withCors(json({ code: 404, error: "not found" }, { status: 404 }));
     }
 
     let topic: string;
     try {
       topic = sanitizeTopic(parsed.topic);
     } catch (err) {
-      return json({ code: 400, error: (err as Error).message }, { status: 400 });
+      return withCors(json({ code: 400, error: (err as Error).message }, { status: 400 }));
     }
 
     const id = env.TOPIC_HUB.idFromName(topic);
     const stub = env.TOPIC_HUB.get(id);
 
+    if (parsed.isAuth && request.method === "GET") {
+      return withCors(json({ success: true }));
+    }
+
     if (parsed.isSse && request.method === "GET") {
-      return stub.fetch("https://hub.internal/subscribe", {
+      return withCors(
+        await stub.fetch("https://hub.internal/subscribe", {
+          method: "GET",
+          headers: {
+            "x-topic": topic,
+            "cf-connecting-ip": request.headers.get("cf-connecting-ip") || "",
+            "user-agent": request.headers.get("user-agent") || "",
+          },
+        }),
+      );
+    }
+
+    if (parsed.isWs && request.method === "GET") {
+      // Forward the WebSocket upgrade to the DO — do not apply CORS to 101 responses
+      return stub.fetch("https://hub.internal/subscribe-ws", {
         method: "GET",
         headers: {
           "x-topic": topic,
+          upgrade: "websocket",
           "cf-connecting-ip": request.headers.get("cf-connecting-ip") || "",
           "user-agent": request.headers.get("user-agent") || "",
         },
       });
     }
 
-    if (!parsed.isSse && request.method === "GET") {
-      return stub.fetch("https://hub.internal/stats", {
-        method: "GET",
-        headers: {
-          "x-topic": topic,
-        },
-      });
+    if (!parsed.isSse && !parsed.isWs && request.method === "GET") {
+      return withCors(
+        await stub.fetch("https://hub.internal/stats", {
+          method: "GET",
+          headers: {
+            "x-topic": topic,
+          },
+        }),
+      );
     }
 
-    if (!parsed.isSse && (request.method === "POST" || request.method === "PUT")) {
+    if (!parsed.isSse && !parsed.isWs && (request.method === "POST" || request.method === "PUT")) {
       const message = await request.text();
       const payload = {
         topic,
         message,
         title: parseTitle(request.headers),
       };
-      return stub.fetch("https://hub.internal/publish", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-topic": topic,
-          "cf-connecting-ip": request.headers.get("cf-connecting-ip") || "",
-          "user-agent": request.headers.get("user-agent") || "",
-        },
-        body: JSON.stringify(payload),
-      });
+      return withCors(
+        await stub.fetch("https://hub.internal/publish", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-topic": topic,
+            "cf-connecting-ip": request.headers.get("cf-connecting-ip") || "",
+            "user-agent": request.headers.get("user-agent") || "",
+          },
+          body: JSON.stringify(payload),
+        }),
+      );
     }
 
-    return json({ code: 405, error: "method not allowed" }, { status: 405 });
+    return withCors(json({ code: 405, error: "method not allowed" }, { status: 405 }));
   },
 };
 
@@ -267,13 +333,7 @@ export class TopicHub extends DurableObject<Env> {
   private readonly rateLimitWindowMs = 10_000;
   private readonly maxPublishesPerWindow = 30;
   private recentPublishTimestamps: number[] = [];
-  private subscribers = new Map<
-    string,
-    {
-      writer: WritableStreamDefaultWriter<Uint8Array>;
-      keepalive?: ReturnType<typeof setInterval>;
-    }
-  >();
+  private subscribers = new Map<string, Subscriber>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -297,6 +357,10 @@ export class TopicHub extends DurableObject<Env> {
 
     if (url.pathname === "/subscribe") {
       return this.handleSubscribe(request);
+    }
+
+    if (url.pathname === "/subscribe-ws") {
+      return this.handleSubscribeWs(request);
     }
 
     if (url.pathname === "/publish" && request.method === "POST") {
@@ -333,12 +397,7 @@ export class TopicHub extends DurableObject<Env> {
           subscribers: this.subscribers.size,
           maxSubscribers,
         },
-        {
-          status: 429,
-          headers: {
-            "access-control-allow-origin": "*",
-          },
-        },
+        { status: 429 },
       );
     }
 
@@ -348,7 +407,7 @@ export class TopicHub extends DurableObject<Env> {
     const stream = new TransformStream<Uint8Array, Uint8Array>();
     const writer = stream.writable.getWriter();
 
-    this.subscribers.set(subscriberId, { writer });
+    this.subscribers.set(subscriberId, { kind: "sse", writer });
 
     console.log(
       JSON.stringify({
@@ -363,7 +422,7 @@ export class TopicHub extends DurableObject<Env> {
 
     const cleanup = async () => {
       const entry = this.subscribers.get(subscriberId);
-      if (!entry) return;
+      if (!entry || entry.kind !== "sse") return;
       if (entry.keepalive) clearInterval(entry.keepalive);
       this.subscribers.delete(subscriberId);
       try {
@@ -380,7 +439,10 @@ export class TopicHub extends DurableObject<Env> {
       topic,
     };
 
-    await writer.write(encoder.encode(toSseFrame("open", openEvent, openEvent.id)));
+    // Do not await — returning the Response must happen first so the edge
+    // starts consuming the readable; awaiting here deadlocks on production
+    // because TransformStream's readable HWM is 0 (writes block until read).
+    void writer.write(encoder.encode(toSseFrame("open", openEvent, openEvent.id)));
 
     const keepalive = setInterval(async () => {
       const event: KeepaliveEvent = {
@@ -419,9 +481,103 @@ export class TopicHub extends DurableObject<Env> {
         "cache-control": "no-cache, no-store, must-revalidate",
         connection: "keep-alive",
         "x-accel-buffering": "no",
-        "access-control-allow-origin": "*",
       },
     });
+  }
+
+  private handleSubscribeWs(request: Request): Response {
+    const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
+    const userAgent = request.headers.get("user-agent") || "unknown";
+    const topic = request.headers.get("x-topic") || this.ctx.id.toString();
+    const maxSubscribers = this.maxSubscribersPerTopic();
+
+    if (this.subscribers.size >= maxSubscribers) {
+      console.log(
+        JSON.stringify({
+          event: "ws_subscribe_rejected",
+          reason: "max_subscribers",
+          topic,
+          subscribers: this.subscribers.size,
+          maxSubscribers,
+          clientIp,
+          userAgent,
+        }),
+      );
+
+      return json(
+        {
+          code: 429,
+          error: "too many subscribers",
+          topic,
+          subscribers: this.subscribers.size,
+          maxSubscribers,
+        },
+        { status: 429 },
+      );
+    }
+
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+    server.accept();
+
+    const subscriberId = makeId();
+    this.subscribers.set(subscriberId, { kind: "ws", socket: server });
+
+    console.log(
+      JSON.stringify({
+        event: "ws_subscribe",
+        topic,
+        subscriberId,
+        subscribers: this.subscribers.size,
+        clientIp,
+        userAgent,
+      }),
+    );
+
+    const cleanup = () => {
+      const entry = this.subscribers.get(subscriberId);
+      if (!entry || entry.kind !== "ws") return;
+      if (entry.keepalive) clearInterval(entry.keepalive);
+      this.subscribers.delete(subscriberId);
+      try {
+        entry.socket.close();
+      } catch {
+        // Ignore already-closed sockets.
+      }
+    };
+
+    const openEvent: OpenEvent = { id: makeId(), time: unixNow(), event: "open", topic };
+    server.send(JSON.stringify(openEvent));
+
+    const keepalive = setInterval(() => {
+      const event: KeepaliveEvent = { id: makeId(), time: unixNow(), event: "keepalive", topic };
+      try {
+        server.send(JSON.stringify(event));
+      } catch {
+        clearInterval(keepalive);
+        this.subscribers.delete(subscriberId);
+      }
+    }, 25000);
+
+    const entry = this.subscribers.get(subscriberId);
+    if (entry) entry.keepalive = keepalive;
+
+    server.addEventListener("close", () => {
+      console.log(
+        JSON.stringify({
+          event: "ws_close",
+          topic,
+          subscriberId,
+          subscribers: Math.max(0, this.subscribers.size - 1),
+          clientIp,
+        }),
+      );
+      cleanup();
+    });
+
+    server.addEventListener("error", () => cleanup());
+
+    return new Response(null, { status: 101, webSocket: client });
   }
 
   private handleStats(request: Request): Response {
@@ -440,12 +596,7 @@ export class TopicHub extends DurableObject<Env> {
       },
     };
 
-    return json(stats, {
-      status: 200,
-      headers: {
-        "access-control-allow-origin": "*",
-      },
-    });
+    return json(stats, { status: 200 });
   }
 
   private async handlePublish(request: Request): Promise<Response> {
@@ -477,7 +628,6 @@ export class TopicHub extends DurableObject<Env> {
         {
           status: 429,
           headers: {
-            "access-control-allow-origin": "*",
             "retry-after": String(Math.ceil(this.rateLimitWindowMs / 1000)),
           },
         },
@@ -500,14 +650,19 @@ export class TopicHub extends DurableObject<Env> {
       ...(body.title ? { title: body.title } : {}),
     };
 
-    const frame = new TextEncoder().encode(toSseFrame("message", event, event.id));
+    const sseFrame = new TextEncoder().encode(toSseFrame("message", event, event.id));
+    const wsFrame = JSON.stringify(event);
     this.publishedCount += 1;
 
     const dead: string[] = [];
     await Promise.all(
       [...this.subscribers.entries()].map(async ([id, sub]) => {
         try {
-          await sub.writer.write(frame);
+          if (sub.kind === "sse") {
+            await sub.writer.write(sseFrame);
+          } else {
+            sub.socket.send(wsFrame);
+          }
         } catch {
           if (sub.keepalive) clearInterval(sub.keepalive);
           dead.push(id);
@@ -529,16 +684,10 @@ export class TopicHub extends DurableObject<Env> {
         clientIp,
         userAgent,
         publishedCount: this.publishedCount,
-        bytes: frame.byteLength,
       }),
     );
 
-    return json(event, {
-      status: 200,
-      headers: {
-        "access-control-allow-origin": "*",
-      },
-    });
+    return json(event, { status: 200 });
   }
 
   private pruneRecentPublishes(nowMs: number): void {

@@ -34,46 +34,38 @@ describe("cfty", () => {
     expect(event.topic).toBe("my-topic");
   });
 
-  // workerd local mode holds the DO locked while a streaming response body is
-  // open, so publish requests to the same DO instance are queued indefinitely.
-  // This works correctly on the production Cloudflare runtime.
-  it.skip("pub/sub: subscriber receives published message", async () => {
+  it("pub/sub: subscriber receives published message", async () => {
     const topic = "pubsub-test";
 
     const sseCtx = createExecutionContext();
     const decoder = new TextDecoder();
-    const chunks: string[] = [];
 
-    // Start subscribe and publish concurrently — the DO serializes requests
-    // so we must not await subscribe before issuing publish.
-    const ssePromise = worker.fetch(
+    // Subscribe first — deadlock is fixed so this returns immediately
+    const sseRes = await worker.fetch(
       new Request(`http://localhost/${topic}/sse`),
       env,
       sseCtx,
     );
-
-    // Kick off publish without awaiting subscribe first
-    const pubPromise = req(`/${topic}`, { method: "POST", body: "hello subscriber" });
-
-    const [sseRes, pubRes] = await Promise.all([ssePromise, pubPromise]);
-
     expect(sseRes.status).toBe(200);
     expect(sseRes.headers.get("content-type")).toContain("text/event-stream");
+
+    const reader = sseRes.body!.getReader();
+    const readChunk = async () => decoder.decode((await reader.read()).value);
+
+    // Open event
+    const openChunk = await readChunk();
+    expect(openChunk).toContain("event: open");
+
+    // Publish
+    const pubRes = await req(`/${topic}`, { method: "POST", body: "hello subscriber" });
     expect(pubRes.status).toBe(200);
 
-    // Drain the SSE stream until we have both the open and message events
-    const reader = sseRes.body!.getReader();
-    while (chunks.join("").indexOf("event: message") === -1) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      chunks.push(decoder.decode(value));
-    }
-    reader.cancel();
+    // Message event delivered to subscriber
+    const msgChunk = await readChunk();
+    expect(msgChunk).toContain("event: message");
+    expect(msgChunk).toContain("hello subscriber");
 
-    const body = chunks.join("");
-    expect(body).toContain("event: open");
-    expect(body).toContain("event: message");
-    expect(body).toContain("hello subscriber");
+    reader.cancel();
   });
 
   it("POST with Title header includes title in event", async () => {
