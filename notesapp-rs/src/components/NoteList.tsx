@@ -4,6 +4,8 @@ import { createNote } from '../lib/db'
 import { useVisibleNotes } from '../lib/dbHooks'
 import { SyncStatus } from './SyncStatus'
 import { parseMarkdownToNote } from '../lib/importMarkdown'
+import { Button } from './ui/Button'
+import { Input } from './ui/Input'
 
 export function NoteList() {
   const [query, setQuery] = useState('')
@@ -64,20 +66,28 @@ export function NoteList() {
             onChange={handleImportFiles}
             className="hidden"
           />
-          <button
+          <Button
             type="button"
             onClick={() => importInputRef.current?.click()}
-            className="border border-gray-300 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-50 text-sm"
+            variant="outline"
+            size="sm"
           >
             Upload .md
-          </button>
-          <button
+          </Button>
+          <Link
+            to="/preferences"
+            className="border border-gray-300 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-50 text-sm"
+          >
+            Preferences
+          </Link>
+          <Button
             data-testid="new-note-btn"
             onClick={handleNew}
-            className="bg-blue-500 text-white px-4 py-1.5 rounded hover:bg-blue-600 text-sm"
+            variant="default"
+            size="md"
           >
             New note
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -85,13 +95,13 @@ export function NoteList() {
         <p className="mb-3 text-xs text-red-600">{importError}</p>
       )}
 
-      <input
+      <Input
         data-testid="search-input"
         type="search"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Search notes…"
-        className="w-full mb-4 px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400 placeholder-gray-300"
+        className="w-full mb-4"
       />
 
       {notes === undefined && <p className="text-gray-400 text-sm">Loading…</p>}

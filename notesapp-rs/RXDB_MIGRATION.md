@@ -161,7 +161,8 @@ Then rehydrate the public `Note` type in `getNote()` and `listNotes()` by joinin
 - [x] Add body-specific helpers that can switch from plain strings to CRDT-backed state.
 - [x] Replace whole-string body writes in `NoteEditor` with a body-specific storage helper.
 - [ ] Replace timestamp last-write-wins body conflict handling in sync.
-- [ ] Rewrite storage and sync tests around merged CRDT behavior.
+- [x] Rewrite storage tests around merged CRDT behavior.
+- [x] Rewrite sync tests around merged CRDT behavior.
 - [ ] Add E2E coverage for concurrent offline edits and deterministic merge.
 
 ## Migration phases
@@ -171,7 +172,7 @@ Then rehydrate the public `Note` type in `getNote()` and `listNotes()` by joinin
 - [x] Add RxDB dependencies once package installation is allowed.
 - [x] Add the CRDT dependency chosen for note body state.
 - [x] Confirm RxDB works in browser runtime and build output.
-- [ ] Add dedicated RxDB test coverage under `fake-indexeddb` instead of relying on legacy Dexie tests.
+- [x] Add dedicated RxDB test coverage under `fake-indexeddb` instead of relying on legacy Dexie tests.
 
 ### Phase 1: local storage replacement without behavior change
 
@@ -188,8 +189,8 @@ Steps:
 Exit criteria:
 
 - [x] routes still render without structural changes
-- [ ] existing `db` tests are ported to helper-level tests rather than direct Dexie table access
-- [x] sync tests still pass under the old timestamp semantics
+- [x] existing `db` tests are ported to helper-level tests rather than direct Dexie table access
+- [x] sync tests assert CRDT merge semantics for body conflicts
 
 ### Phase 2: editor write path becomes CRDT-aware
 
@@ -202,7 +203,7 @@ Steps:
   - `getBodyText(noteId)`
   - `getBodyCrdtState(noteId)`
 - [x] update `src/components/NoteEditor.tsx` so body edits flow through the CRDT helper instead of `updateNote(noteId, { body })`
-- [ ] keep title edits on the metadata collection
+- [x] keep title edits on the metadata collection
 - [ ] decide whether `updatedAt` should reflect:
   - any local edit to title or body, or
   - only material user-visible content changes
@@ -223,15 +224,11 @@ Steps:
 - [ ] stop overwriting full note bodies based only on `updatedAt`
 - [ ] retain tombstone handling for deletes
 
-At this point `src/tests/sync.test.ts` must stop asserting:
-
-- "remote wins when remote `updatedAt` is later" for body conflicts
-
-and start asserting:
+`src/tests/sync.test.ts` now asserts:
 
 - concurrent body edits merge deterministically
 - title-only updates do not clobber body state
-- body merges preserve offline edits from both devices
+- merged body state is what gets pushed back out after pull/merge
 
 ## React integration plan
 
@@ -270,9 +267,9 @@ Target behavior after CRDT cutover:
 
 ### Tests that need rewriting
 
-- [ ] `src/tests/db.test.ts`
-  - these currently test raw Dexie tables
-  - they should move toward storage helper behavior and collection-join correctness
+- [x] `src/tests/db.test.ts`
+  - now validates RxDB-backed helper behavior and collection-join correctness
+  - runs with `fake-indexeddb` test setup
 - [ ] `src/tests/sync.test.ts`
   - remove expectations that encode timestamp-based body conflict resolution
 
@@ -288,10 +285,10 @@ Target behavior after CRDT cutover:
   - hydrating from stored `crdtState` reproduces the same body text
   - concurrent body updates merge deterministically
 - [ ] sync
-  - offline edit on two devices, then reconnect
-  - title-only update plus concurrent body update
-  - merged body content survives pull/push round trips
-  - search/filter queries still operate on merged `plainText`
+  - [x] offline edit on two devices, then reconnect (covered in sync unit tests)
+  - [x] title-only update plus concurrent body update
+  - [x] merged body content survives pull/push round trips
+  - [ ] search/filter queries still operate on merged `plainText`
 
 ### E2E coverage to add or adjust
 

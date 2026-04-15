@@ -10,10 +10,68 @@ import {
   markSyncError,
   setSetting,
 } from './db'
-import { pushNote, pullAllNotes, isConnected, pushTombstone, listRemoteTombstoneIds } from './remotestorage'
+import {
+  pushNote,
+  pullAllNotes,
+  isConnected,
+  pushTombstone,
+  listRemoteTombstoneIds,
+  pullNote,
+  hasRemoteTombstone,
+} from './remotestorage'
+import { publishNoteChanged, subscribeToNoteChanges, type NtfySubscription } from './notify'
+
+const DEFAULT_PUSH_INTERVAL_MS = 5_000
+const DEFAULT_PULL_INTERVAL_MS = 5_000
 
 let pushTimer: ReturnType<typeof setInterval> | null = null
 let pullTimer: ReturnType<typeof setInterval> | null = null
+let ntfySubscription: NtfySubscription | null = null
+let pendingNotificationTimer: ReturnType<typeof setTimeout> | null = null
+const pendingNotifiedNotes = new Map<string, 'upsert' | 'delete'>()
+
+function queueNtfyTargetedPull(noteId: string, op: 'upsert' | 'delete'): void {
+  pendingNotifiedNotes.set(noteId, op)
+
+  if (pendingNotificationTimer) {
+    clearTimeout(pendingNotificationTimer)
+  }
+
+  pendingNotificationTimer = setTimeout(async () => {
+    pendingNotificationTimer = null
+    const pending = [...pendingNotifiedNotes.entries()]
+    pendingNotifiedNotes.clear()
+
+    for (const [queuedNoteId, queuedOp] of pending) {
+      try {
+        if (queuedOp === 'delete') {
+          const tombstoneExists = await hasRemoteTombstone(queuedNoteId)
+          if (tombstoneExists) {
+            await applyRemoteTombstone(queuedNoteId)
+          }
+          continue
+        }
+
+        const remote = await pullNote(queuedNoteId)
+        if (remote) {
+          await applyRemoteNote(remote)
+        }
+      } catch (error) {
+        console.error('Failed targeted pull for notification', queuedNoteId, error)
+      }
+    }
+
+    await setSetting('lastPullAt', new Date().toISOString())
+  }, 500)
+}
+
+async function maybePublishNtfy(noteId: string, op: 'upsert' | 'delete'): Promise<void> {
+  try {
+    await publishNoteChanged(noteId, op)
+  } catch (error) {
+    console.warn('Failed to publish ntfy event', error)
+  }
+}
 
 export async function pushDirtyNotes(): Promise<void> {
   if (!isConnected()) return
@@ -24,6 +82,7 @@ export async function pushDirtyNotes(): Promise<void> {
     try {
       await pushNote(note)
       await markSynced(note.id)
+      await maybePublishNtfy(note.id, 'upsert')
       pushed++
     } catch (err) {
       await markSyncError(note.id, String(err))
@@ -37,6 +96,7 @@ export async function pushDirtyNotes(): Promise<void> {
     try {
       await pushTombstone(noteId)
       await clearPendingDelete(noteId)
+      await maybePublishNtfy(noteId, 'delete')
       if (pushed === 0) await setSetting('lastPushAt', new Date().toISOString())
     } catch (err) {
       console.error('Failed to push tombstone for', noteId, err)
@@ -59,10 +119,11 @@ export async function pullAndMerge(): Promise<void> {
   await setSetting('lastPullAt', new Date().toISOString())
 }
 
-export function startSyncLoop(): void {
+export function startSyncLoop(options?: { pullIntervalMs?: number }): void {
   stopSyncLoop()
-  pushTimer = setInterval(pushDirtyNotes, 5_000)
-  pullTimer = setInterval(pullAndMerge, 5_000)
+  const pullIntervalMs = options?.pullIntervalMs ?? DEFAULT_PULL_INTERVAL_MS
+  pushTimer = setInterval(pushDirtyNotes, DEFAULT_PUSH_INTERVAL_MS)
+  pullTimer = setInterval(pullAndMerge, pullIntervalMs)
 }
 
 export function stopSyncLoop(): void {
@@ -70,6 +131,30 @@ export function stopSyncLoop(): void {
   if (pullTimer) clearInterval(pullTimer)
   pushTimer = null
   pullTimer = null
+}
+
+export async function startNtfyListener(): Promise<void> {
+  stopNtfyListener()
+
+  ntfySubscription = await subscribeToNoteChanges(
+    ({ noteId, op }) => {
+      queueNtfyTargetedPull(noteId, op)
+    },
+    (error) => {
+      console.warn('ntfy listener error', error)
+    },
+  )
+}
+
+export function stopNtfyListener(): void {
+  ntfySubscription?.close()
+  ntfySubscription = null
+
+  if (pendingNotificationTimer) {
+    clearTimeout(pendingNotificationTimer)
+    pendingNotificationTimer = null
+  }
+  pendingNotifiedNotes.clear()
 }
 
 // Debounced push after local edits
@@ -89,6 +174,7 @@ export function schedulePush(noteId: string): void {
       try {
         await pushNote(note)
         await markSynced(noteId)
+        await maybePublishNtfy(noteId, 'upsert')
         await setSetting('lastPushAt', new Date().toISOString())
       } catch (err) {
         await markSyncError(noteId, String(err))

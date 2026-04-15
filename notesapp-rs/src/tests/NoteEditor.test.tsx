@@ -37,6 +37,7 @@ vi.mock('../lib/db', () => ({
 vi.mock('../lib/dbHooks', () => ({
   useNote: () => currentNote,
   useSyncMeta: () => currentMeta,
+  useSetting: () => undefined,
 }))
 
 vi.mock('../lib/sync', () => ({
