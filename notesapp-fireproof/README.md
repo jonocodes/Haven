@@ -6,3 +6,5 @@ See [spec](../docs/lite/haven_lite_fireproof_notes_spec.md) for full design deta
 
 
 *TOOD: implement this*
+
+I think I'm not going to do this after a short evaluation of fireproof since the data is not user-centric enough.

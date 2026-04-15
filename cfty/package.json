@@ -1,0 +1,16 @@
+{
+  "name": "cfty",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.14.7",
+    "vitest": "^4.1.4",
+    "wrangler": "^4.0.0"
+  }
+}

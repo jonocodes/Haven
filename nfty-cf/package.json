@@ -1,0 +1,15 @@
+{
+  "name": "nfty-cf",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build:wasm": "cd wasm && CGO_ENABLED=0 GOOS=wasip1 GOARCH=wasm go build -o ../ntfy.wasm .",
+    "dev": "npm run build:wasm && wrangler dev",
+    "deploy": "npm run build:wasm && wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-wasi": "^0.0.5",
+    "wrangler": "^4.0.0"
+  }
+}

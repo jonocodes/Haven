@@ -1,0 +1,8 @@
+{
+  "name": "nfty-cf",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-04-14",
+  "observability": {
+    "enabled": true
+  }
+}
