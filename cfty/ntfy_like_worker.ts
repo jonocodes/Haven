@@ -9,6 +9,7 @@ import { DurableObject } from "cloudflare:workers";
 //   GET  /:topic/sse Subscribe to live SSE events for a topic
 //   GET  /:topic/ws  Subscribe via WebSocket (ntfy web client compatible)
 //   GET  /:topic/auth Check topic authorization
+//   POST /:topic/json Publish a JSON-formatted message body to a topic
 //
 // Notes:
 // - Live-only: no persistence, no replay/history, no filtering
@@ -31,6 +32,17 @@ type PublishEvent = {
   topic: string;
   message: string;
   title?: string;
+  priority?: number;
+  tags?: string[];
+  click?: string;
+};
+
+type JsonPublishBody = {
+  message: string;
+  title?: string;
+  priority?: number;
+  tags?: string[];
+  click?: string;
 };
 
 type OpenEvent = {
@@ -63,6 +75,7 @@ type SseSubscriber = {
   kind: "sse";
   writer: WritableStreamDefaultWriter<Uint8Array>;
   keepalive?: ReturnType<typeof setInterval>;
+  lastEventId?: string;
 };
 
 type WsSubscriber = {
@@ -123,36 +136,68 @@ function hasAuthConfigured(env: Env): boolean {
 }
 
 function isAuthorized(request: Request, env: Env): boolean {
-  const auth = request.headers.get("authorization");
-  if (!auth) return false;
+    const url = new URL(request.url);
+    const authHeader = request.headers.get("authorization");
+    const authParam = url.searchParams.get("auth");
 
-  if (auth.startsWith("Basic ")) {
-    if (!env.BASIC_AUTH_USER || !env.BASIC_AUTH_PASS) return false;
+    if (authHeader) {
+      if (authHeader.startsWith("Basic ")) {
+        if (!env.BASIC_AUTH_USER || !env.BASIC_AUTH_PASS) return false;
 
-    let decoded = "";
-    try {
-      decoded = atob(auth.slice("Basic ".length));
-    } catch {
+        let decoded = "";
+        try {
+          decoded = atob(authHeader.slice("Basic ".length));
+        } catch {
+          return false;
+        }
+
+        const idx = decoded.indexOf(":");
+        if (idx < 0) return false;
+
+        const user = decoded.slice(0, idx);
+        const pass = decoded.slice(idx + 1);
+
+        return timingSafeEqual(user, env.BASIC_AUTH_USER) && timingSafeEqual(pass, env.BASIC_AUTH_PASS);
+      }
+
+      if (authHeader.startsWith("Bearer ")) {
+        if (!env.BEARER_AUTH_TOKEN) return false;
+        const token = authHeader.slice("Bearer ".length);
+        return timingSafeEqual(token, env.BEARER_AUTH_TOKEN);
+      }
+
       return false;
     }
 
-    const idx = decoded.indexOf(":");
-    if (idx < 0) return false;
+    if (authParam) {
+      if (authParam.startsWith("Basic ")) {
+        if (!env.BASIC_AUTH_USER || !env.BASIC_AUTH_PASS) return false;
 
-    const user = decoded.slice(0, idx);
-    const pass = decoded.slice(idx + 1);
+        let decoded = "";
+        try {
+          decoded = atob(authParam.slice("Basic ".length));
+        } catch {
+          return false;
+        }
 
-    return timingSafeEqual(user, env.BASIC_AUTH_USER) && timingSafeEqual(pass, env.BASIC_AUTH_PASS);
+        const idx = decoded.indexOf(":");
+        if (idx < 0) return false;
+
+        const user = decoded.slice(0, idx);
+        const pass = decoded.slice(idx + 1);
+
+        return timingSafeEqual(user, env.BASIC_AUTH_USER) && timingSafeEqual(pass, env.BASIC_AUTH_PASS);
+      }
+
+      if (env.BEARER_AUTH_TOKEN) {
+        return timingSafeEqual(authParam, env.BEARER_AUTH_TOKEN);
+      }
+
+      return false;
+    }
+
+    return false;
   }
-
-  if (auth.startsWith("Bearer ")) {
-    if (!env.BEARER_AUTH_TOKEN) return false;
-    const token = auth.slice("Bearer ".length);
-    return timingSafeEqual(token, env.BEARER_AUTH_TOKEN);
-  }
-
-  return false;
-}
 
 function unixNow(): number {
   return Math.floor(Date.now() / 1000);
@@ -164,19 +209,22 @@ function makeId(): string {
 
 function parseTopicFromPath(
   pathname: string,
-): { topic: string; isSse: boolean; isWs: boolean; isAuth: boolean } | null {
+): { topic: string; isSse: boolean; isWs: boolean; isAuth: boolean; isJson: boolean } | null {
   const parts = pathname.split("/").filter(Boolean);
   if (parts.length === 1) {
-    return { topic: parts[0], isSse: false, isWs: false, isAuth: false };
+    return { topic: parts[0], isSse: false, isWs: false, isAuth: false, isJson: false };
   }
   if (parts.length === 2 && parts[1] === "sse") {
-    return { topic: parts[0], isSse: true, isWs: false, isAuth: false };
+    return { topic: parts[0], isSse: true, isWs: false, isAuth: false, isJson: false };
   }
   if (parts.length === 2 && parts[1] === "ws") {
-    return { topic: parts[0], isSse: false, isWs: true, isAuth: false };
+    return { topic: parts[0], isSse: false, isWs: true, isAuth: false, isJson: false };
   }
   if (parts.length === 2 && parts[1] === "auth") {
-    return { topic: parts[0], isSse: false, isWs: false, isAuth: true };
+    return { topic: parts[0], isSse: false, isWs: false, isAuth: true, isJson: false };
+  }
+  if (parts.length === 2 && parts[1] === "json") {
+    return { topic: parts[0], isSse: false, isWs: false, isAuth: false, isJson: true };
   }
   return null;
 }
@@ -241,7 +289,9 @@ export default {
             "  PUT  /:topic",
             "  GET  /:topic",
             "  GET  /:topic/sse",
-            "  GET  /:topic/ws",
+            "  POST /:topic/json",
+            "  PUT  /:topic/json",
+            "  GET  /:topic/auth",
           ].join("\n"),
         ),
       );
@@ -267,6 +317,7 @@ export default {
     }
 
     if (parsed.isSse && request.method === "GET") {
+      const lastEventId = request.headers.get("Last-Event-ID") || url.searchParams.get("since") || undefined;
       return withCors(
         await stub.fetch("https://hub.internal/subscribe", {
           method: "GET",
@@ -274,6 +325,7 @@ export default {
             "x-topic": topic,
             "cf-connecting-ip": request.headers.get("cf-connecting-ip") || "",
             "user-agent": request.headers.get("user-agent") || "",
+            ...(lastEventId ? { "x-last-event-id": lastEventId } : {}),
           },
         }),
       );
@@ -324,6 +376,22 @@ export default {
       );
     }
 
+    if (parsed.isJson && request.method === "POST") {
+      const body = await request.json();
+      return withCors(
+        await stub.fetch("https://hub.internal/publish-json", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-topic": topic,
+            "cf-connecting-ip": request.headers.get("cf-connecting-ip") || "",
+            "user-agent": request.headers.get("user-agent") || "",
+          },
+          body: JSON.stringify(body),
+        }),
+      );
+    }
+
     return withCors(json({ code: 405, error: "method not allowed" }, { status: 405 }));
   },
 };
@@ -334,6 +402,8 @@ export class TopicHub extends DurableObject<Env> {
   private readonly maxPublishesPerWindow = 30;
   private recentPublishTimestamps: number[] = [];
   private subscribers = new Map<string, Subscriber>();
+  private readonly replayBufferSize = 100;
+  private replayBuffer: PublishEvent[] = [];
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -367,6 +437,10 @@ export class TopicHub extends DurableObject<Env> {
       return this.handlePublish(request);
     }
 
+    if (url.pathname === "/publish-json" && request.method === "POST") {
+      return this.handlePublishJson(request);
+    }
+
     return json({ code: 404, error: "not found" }, { status: 404 });
   }
 
@@ -374,6 +448,8 @@ export class TopicHub extends DurableObject<Env> {
     const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
     const userAgent = request.headers.get("user-agent") || "unknown";
     const topic = request.headers.get("x-topic") || this.ctx.id.toString();
+    const lastEventId = request.headers.get("x-last-event-id") || undefined;
+    const sinceParam = request.headers.get("x-since-param") || undefined;
     const maxSubscribers = this.maxSubscribersPerTopic();
 
     if (this.subscribers.size >= maxSubscribers) {
@@ -475,12 +551,25 @@ export class TopicHub extends DurableObject<Env> {
       void cleanup();
     });
 
+    if (lastEventId || sinceParam) {
+      const sinceTime = this.resolveSinceTime(lastEventId, sinceParam);
+      const missedEvents = this.getReplayEvents(sinceTime);
+      for (const event of missedEvents) {
+        try {
+          await writer.write(encoder.encode(toSseFrame("message", event, event.id)));
+        } catch {
+          break;
+        }
+      }
+    }
+
     return new Response(stream.readable, {
       headers: {
         "content-type": "text/event-stream; charset=utf-8",
         "cache-control": "no-cache, no-store, must-revalidate",
-        connection: "keep-alive",
+        "connection": "keep-alive",
         "x-accel-buffering": "no",
+        "X-Accel-Buffering": "no",
       },
     });
   }
@@ -653,6 +742,7 @@ export class TopicHub extends DurableObject<Env> {
     const sseFrame = new TextEncoder().encode(toSseFrame("message", event, event.id));
     const wsFrame = JSON.stringify(event);
     this.publishedCount += 1;
+    this.addToReplayBuffer(event);
 
     const dead: string[] = [];
     await Promise.all(
@@ -688,6 +778,132 @@ export class TopicHub extends DurableObject<Env> {
     );
 
     return json(event, { status: 200 });
+  }
+
+  private async handlePublishJson(request: Request): Promise<Response> {
+    const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
+    const userAgent = request.headers.get("user-agent") || "unknown";
+    const topic = request.headers.get("x-topic") || this.ctx.id.toString();
+
+    const nowMs = Date.now();
+    this.pruneRecentPublishes(nowMs);
+    if (this.recentPublishTimestamps.length >= this.maxPublishesPerWindow) {
+      console.log(
+        JSON.stringify({
+          event: "publish_rate_limited",
+          topic,
+          clientIp,
+          userAgent,
+          windowMs: this.rateLimitWindowMs,
+          maxPublishes: this.maxPublishesPerWindow,
+        }),
+      );
+
+      return json(
+        {
+          code: 429,
+          error: "rate limit exceeded",
+          windowMs: this.rateLimitWindowMs,
+          maxPublishes: this.maxPublishesPerWindow,
+        },
+        {
+          status: 429,
+          headers: {
+            "retry-after": String(Math.ceil(this.rateLimitWindowMs / 1000)),
+          },
+        },
+      );
+    }
+    this.recentPublishTimestamps.push(nowMs);
+
+    const body = (await request.json()) as JsonPublishBody;
+
+    if (!body.message) {
+      return json({ code: 400, error: "message is required" }, { status: 400 });
+    }
+
+    const event: PublishEvent = {
+      id: makeId(),
+      time: unixNow(),
+      event: "message",
+      topic,
+      message: body.message,
+      ...(body.title ? { title: body.title } : {}),
+      ...(body.priority !== undefined ? { priority: body.priority } : {}),
+      ...(body.tags ? { tags: body.tags } : {}),
+      ...(body.click ? { click: body.click } : {}),
+    };
+
+    const sseFrame = new TextEncoder().encode(toSseFrame("message", event, event.id));
+    const wsFrame = JSON.stringify(event);
+    this.publishedCount += 1;
+    this.addToReplayBuffer(event);
+
+    const dead: string[] = [];
+    await Promise.all(
+      [...this.subscribers.entries()].map(async ([id, sub]) => {
+        try {
+          if (sub.kind === "sse") {
+            await sub.writer.write(sseFrame);
+          } else {
+            sub.socket.send(wsFrame);
+          }
+        } catch {
+          if (sub.keepalive) clearInterval(sub.keepalive);
+          dead.push(id);
+        }
+      }),
+    );
+
+    for (const id of dead) {
+      this.subscribers.delete(id);
+    }
+
+    console.log(
+      JSON.stringify({
+        event: "publish",
+        topic: event.topic,
+        messageId: event.id,
+        subscribers: this.subscribers.size,
+        deadSubscribers: dead.length,
+        clientIp,
+        userAgent,
+        publishedCount: this.publishedCount,
+      }),
+    );
+
+    return json(event, { status: 200 });
+  }
+
+  private addToReplayBuffer(event: PublishEvent): void {
+    this.replayBuffer.push(event);
+    if (this.replayBuffer.length > this.replayBufferSize) {
+      this.replayBuffer.shift();
+    }
+  }
+
+  private getReplayEvents(sinceTime: number): PublishEvent[] {
+    return this.replayBuffer.filter((e) => e.time > sinceTime);
+  }
+
+  private resolveSinceTime(lastEventId?: string, sinceParam?: string): number {
+    if (lastEventId) {
+      const byId = this.replayBuffer.find((e) => e.id === lastEventId);
+      if (byId) return byId.time;
+    }
+    if (sinceParam) {
+      const sinceNum = Number(sinceParam);
+      if (Number.isFinite(sinceNum)) {
+        if (sinceParam.length === 10) {
+          return sinceNum;
+        }
+        if (sinceParam.length === 13) {
+          return Math.floor(sinceNum / 1000);
+        }
+        return sinceNum;
+      }
+    }
+    return 0;
   }
 
   private pruneRecentPublishes(nowMs: number): void {

@@ -53,6 +53,8 @@ client → POST /topic → Durable Object → broadcast → SSE clients
 
 - `POST /:topic` → publish message
 - `PUT /:topic` → publish message
+- `POST /:topic/json` → publish JSON message (ntfy-compatible)
+- `PUT /:topic/json` → publish JSON message (ntfy-compatible)
 - `GET /:topic/sse` → subscribe via SSE
 - `GET /:topic` → topic stats
 - live-only (no storage)
@@ -92,8 +94,6 @@ http://127.0.0.1:8787
 ```bash
 curl -N http://127.0.0.1:8787/test/sse
 ```
-
-Note: This does not work due to local DO limitations.
 
 
 ## Publish
@@ -138,6 +138,29 @@ Optional header:
 ```
 Title: My Title
 ```
+
+---
+
+## JSON Publish
+
+```
+POST /:topic/json
+PUT  /:topic/json
+```
+
+Body = JSON object:
+
+```json
+{
+  "message": "hello world",
+  "title": "My Title",
+  "priority": 5,
+  "tags": ["tag1", "tag2"],
+  "click": "https://example.com"
+}
+```
+
+All fields are optional. `message` is required.
 
 ---
 
@@ -352,6 +375,34 @@ curl -u admin:change-me -X POST https://your-worker.example/test -d "hello"
 curl -H "Authorization: Bearer change-me-too" -X POST https://your-worker.example/test -d "hello"
 ```
 
+## Example: Auth via query param (ntfy-compatible)
+
+```bash
+curl -X POST "https://your-worker.example/test?auth=Basic%20$(echo -n 'admin:change-me' | base64)" -d "hello"
+curl -X POST "https://your-worker.example/test?auth=change-me-too" -d "hello"
+```
+
+---
+
+## 🔄 Replay / since
+
+When subscribing via SSE, you can request missed messages using:
+
+```
+GET /:topic/sse?since=<timestamp_or_id>
+```
+
+Or via the `Last-Event-ID` header.
+
+The `since` parameter accepts:
+- Unix timestamp in seconds (10 digits, e.g. `1700000000`)
+- Unix timestamp in milliseconds (13 digits, e.g. `1700000000000`)
+- A message ID to replay from that specific message
+
+Messages are buffered in a replay buffer (up to 100 messages per topic) and sent immediately upon connection before the open event.
+
+---
+
 ## Browser note
 
 Native `EventSource` does not let you set arbitrary request headers directly.
@@ -406,13 +457,76 @@ Not currently implemented.
 
 ---
 
-# 🔮 Future Ideas
+# 📊 Implementation Status — ntfy Compatibility
 
-- Last-Event-ID (tiny replay buffer)
-- per-IP rate limiting
-- topic auth (signed URLs)
-- shared Basic / Bearer auth in the Worker
-- compression (gzip)
+## ✅ Implemented
+
+### Core Endpoints
+| Endpoint | Status | Notes |
+|----------|--------|-------|
+| `POST /:topic` | ✅ | Plain text publish |
+| `PUT /:topic` | ✅ | Alias for POST |
+| `POST /:topic/json` | ✅ | JSON publish with metadata |
+| `PUT /:topic/json` | ✅ | Alias for POST |
+| `GET /:topic/sse` | ✅ | SSE subscriptions |
+| `GET /:topic/ws` | ✅ | WebSocket subscriptions |
+| `GET /:topic` | ✅ | Topic stats |
+| `GET /:topic/auth` | ✅ | Auth check |
+
+### Features
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Rate limiting | ✅ | 30 publishes / 10 seconds per topic |
+| Subscriber cap | ✅ | Configurable via `MAX_SUBSCRIBERS_PER_TOPIC` |
+| Basic auth | ✅ | Header + query param |
+| Bearer auth | ✅ | Header + query param |
+| Replay buffer | ✅ | Up to 100 messages, `?since=` or `Last-Event-ID` |
+| Rich message metadata | ✅ | `priority`, `tags`, `click` via `/json` |
+| CORS | ✅ | Full CORS headers |
+
+---
+
+## ❌ Not Implemented
+
+### Core (ntfy server)
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Persistent message history | ❌ | Live-only by design |
+| Message attachments | ❌ | Out of scope |
+| Message actions/buttons | ❌ | Out of scope |
+| Message delivery delays | ❌ | Out of scope |
+| Delete/update semantics | ❌ | No message modification |
+| Per-topic access control | ❌ | Global auth only |
+| User accounts | ❌ | No user system |
+
+### Mobile / Ecosystem
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Push notifications (iOS/Android) | ❌ | Different infrastructure |
+| Android app | ❌ | Separate project |
+| iOS app | ❌ | Separate project |
+| Web UI | ❌ | Future consideration |
+| ntfy.sh compatibility | ❌ | Self-hosted only |
+
+### Advanced
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Per-IP rate limiting | ❌ | Future consideration |
+| Topic signing (HMAC) | ❌ | Future consideration |
+| gzip compression | ❌ | Future consideration |
+| WebSocket to SSE bridge | ❌ | Already implemented via `/ws` |
+
+---
+
+## 🔮 Future Ideas
+
+These are potential enhancements, not guaranteed:
+
+- Per-IP rate limiting
+- Topic signing (HMAC URLs)
+- gzip compression for SSE
+- Simple web UI
+- Delete topic endpoint
 
 ---
 
