@@ -23,8 +23,9 @@
 - [x] Implement geolocation wrapper (optional, non-blocking)
 - [x] Add sync badges/status indicators in gallery
 - [x] Build settings screen (RS connection, quality, max dimension, GPS toggle)
-- [ ] Add PWA manifest and service worker
+- [x] Add PWA manifest and service worker
+- [x] Add remoteStorage.js connect widget
 
 ## Low Priority
 
-- [ ] Add video support behind feature flag (optional)
+- [x] Add video support behind feature flag (optional)

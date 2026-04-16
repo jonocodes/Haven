@@ -19,6 +19,7 @@ import { DurableObject } from "cloudflare:workers";
 export interface Env {
   TOPIC_HUB: DurableObjectNamespace<TopicHub>;
   MAX_SUBSCRIBERS_PER_TOPIC?: string;
+  CACHE_DURATION_MS?: string;
   AUTH_ENABLED?: string;
   BASIC_AUTH_USER?: string;
   BASIC_AUTH_PASS?: string;
@@ -35,6 +36,7 @@ type PublishEvent = {
   priority?: number;
   tags?: string[];
   click?: string;
+  expires?: number; // Unix timestamp, seconds, when message should be deleted
 };
 
 type JsonPublishBody = {
@@ -43,6 +45,7 @@ type JsonPublishBody = {
   priority?: number;
   tags?: string[];
   click?: string;
+  expires?: number; // Unix timestamp or relative seconds
 };
 
 type OpenEvent = {
@@ -56,6 +59,21 @@ type KeepaliveEvent = {
   id: string;
   time: number;
   event: "keepalive";
+  topic: string;
+};
+
+type DeleteEvent = {
+  id: string;
+  time: number;
+  event: "delete";
+  topic: string;
+  messageId: string;
+};
+
+type DeleteAllEvent = {
+  id: string;
+  time: number;
+  event: "delete_all";
   topic: string;
 };
 
@@ -126,13 +144,15 @@ function timingSafeEqual(a: string, b: string): boolean {
 }
 
 function hasAuthConfigured(env: Env): boolean {
+  const authEnabled = env.AUTH_ENABLED?.trim().toLowerCase();
+  if (["0", "false", "off", "no"].includes(authEnabled || "")) {
+    return false;
+  }
+
   const hasCredentials = Boolean((env.BASIC_AUTH_USER && env.BASIC_AUTH_PASS) || env.BEARER_AUTH_TOKEN);
   if (!hasCredentials) return false;
 
-  const authEnabled = env.AUTH_ENABLED?.trim().toLowerCase();
-  if (!authEnabled) return true;
-
-  return !["0", "false", "off", "no"].includes(authEnabled);
+  return true;
 }
 
 function isAuthorized(request: Request, env: Env): boolean {
@@ -209,7 +229,7 @@ function makeId(): string {
 
 function parseTopicFromPath(
   pathname: string,
-): { topic: string; isSse: boolean; isWs: boolean; isAuth: boolean; isJson: boolean } | null {
+): { topic: string; isSse: boolean; isWs: boolean; isAuth: boolean; isJson: boolean; isMessages?: boolean; messageId?: string; isDeleteAll?: boolean; isRetention?: boolean; isPermissions?: boolean } | null {
   const parts = pathname.split("/").filter(Boolean);
   if (parts.length === 1) {
     return { topic: parts[0], isSse: false, isWs: false, isAuth: false, isJson: false };
@@ -226,11 +246,28 @@ function parseTopicFromPath(
   if (parts.length === 2 && parts[1] === "json") {
     return { topic: parts[0], isSse: false, isWs: false, isAuth: false, isJson: true };
   }
+  if (parts.length === 2 && parts[1] === "messages") {
+    return { topic: parts[0], isSse: false, isWs: false, isAuth: false, isJson: false, isMessages: true, isDeleteAll: true };
+  }
+  if (parts.length === 3 && parts[1] === "messages") {
+    return { topic: parts[0], isSse: false, isWs: false, isAuth: false, isJson: false, messageId: parts[2] };
+  }
+  if (parts.length === 2 && parts[1] === "retention") {
+    return { topic: parts[0], isSse: false, isWs: false, isAuth: false, isJson: false, isRetention: true };
+  }
+  if (parts.length === 2 && parts[1] === "permissions") {
+    return { topic: parts[0], isSse: false, isWs: false, isAuth: false, isJson: false, isPermissions: true };
+  }
   return null;
 }
 
 function sanitizeTopic(topic: string): string {
-  const t = topic.trim();
+  let t: string;
+  try {
+    t = decodeURIComponent(topic).trim();
+  } catch {
+    t = topic.trim();
+  }
   if (!t) throw new Error("invalid topic");
   if (t.length > 200) throw new Error("topic too long");
   return t;
@@ -288,10 +325,14 @@ export default {
             "  POST /:topic",
             "  PUT  /:topic",
             "  GET  /:topic",
+            "  GET  /:topic?poll=<seconds>",
+            "  GET  /:topic/messages",
             "  GET  /:topic/sse",
             "  POST /:topic/json",
             "  PUT  /:topic/json",
             "  GET  /:topic/auth",
+            "  DELETE /:topic/messages/:messageId",
+            "  DELETE /:topic/messages",
           ].join("\n"),
         ),
       );
@@ -344,13 +385,82 @@ export default {
       });
     }
 
+    if (parsed.isMessages && request.method === "GET") {
+      return withCors(
+        await stub.fetch("https://hub.internal/messages", {
+          method: "GET",
+          headers: {
+            "x-topic": topic,
+          },
+        }),
+      );
+    }
+
     if (!parsed.isSse && !parsed.isWs && request.method === "GET") {
+      const pollParam = url.searchParams.get("poll");
+      if (pollParam) {
+        return withCors(
+          await stub.fetch("https://hub.internal/poll", {
+            method: "GET",
+            headers: {
+              "x-topic": topic,
+              "x-poll": pollParam,
+              "cf-connecting-ip": request.headers.get("cf-connecting-ip") || "",
+              "user-agent": request.headers.get("user-agent") || "",
+            },
+          }),
+        );
+      }
       return withCors(
         await stub.fetch("https://hub.internal/stats", {
           method: "GET",
           headers: {
             "x-topic": topic,
           },
+        }),
+      );
+    }
+
+    if (parsed.isRetention && request.method === "PUT") {
+      const rawBody = await request.text();
+      return withCors(
+        await stub.fetch("https://hub.internal/retention", {
+          method: "PUT",
+          headers: {
+            "content-type": "text/plain",
+            "x-topic": topic,
+          },
+          body: rawBody,
+        }),
+      );
+    }
+
+    if (parsed.isPermissions && request.method === "PUT") {
+      const rawBody = await request.text();
+      return withCors(
+        await stub.fetch("https://hub.internal/permissions", {
+          method: "PUT",
+          headers: {
+            "content-type": "text/plain",
+            "x-topic": topic,
+          },
+          body: rawBody,
+        }),
+      );
+    }
+
+    if (parsed.isJson && (request.method === "POST" || request.method === "PUT")) {
+      const rawBody = await request.text();
+      return withCors(
+        await stub.fetch("https://hub.internal/publish-json", {
+          method: "POST",
+          headers: {
+            "content-type": "text/plain",
+            "x-topic": topic,
+            "cf-connecting-ip": request.headers.get("cf-connecting-ip") || "",
+            "user-agent": request.headers.get("user-agent") || "",
+          },
+          body: rawBody,
         }),
       );
     }
@@ -376,10 +486,25 @@ export default {
       );
     }
 
-    if (parsed.isJson && request.method === "POST") {
-      const body = await request.json();
+    if (parsed.messageId && request.method === "DELETE") {
       return withCors(
-        await stub.fetch("https://hub.internal/publish-json", {
+        await stub.fetch("https://hub.internal/delete-message", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-topic": topic,
+            "x-message-id": parsed.messageId,
+            "cf-connecting-ip": request.headers.get("cf-connecting-ip") || "",
+            "user-agent": request.headers.get("user-agent") || "",
+          },
+          body: JSON.stringify({ messageId: parsed.messageId }),
+        }),
+      );
+    }
+
+    if (parsed.isDeleteAll && request.method === "DELETE") {
+      return withCors(
+        await stub.fetch("https://hub.internal/delete-all-messages", {
           method: "POST",
           headers: {
             "content-type": "application/json",
@@ -387,7 +512,7 @@ export default {
             "cf-connecting-ip": request.headers.get("cf-connecting-ip") || "",
             "user-agent": request.headers.get("user-agent") || "",
           },
-          body: JSON.stringify(body),
+          body: JSON.stringify({}),
         }),
       );
     }
@@ -404,6 +529,8 @@ export class TopicHub extends DurableObject<Env> {
   private subscribers = new Map<string, Subscriber>();
   private readonly replayBufferSize = 100;
   private replayBuffer: PublishEvent[] = [];
+  private topicRetentionMs: number | null = null;
+  private topicPermission: "read-write" | "read-only" | "write-only" | "none" = "read-write";
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -416,6 +543,55 @@ export class TopicHub extends DurableObject<Env> {
       return Math.trunc(parsed);
     }
     return 100;
+  }
+
+  private cacheDurationMs(): number {
+    const raw = this.env.CACHE_DURATION_MS;
+    if (!raw) return 0;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+    return Math.trunc(parsed);
+  }
+
+  private retentionDurationMs(): number {
+    if (this.topicRetentionMs !== null) {
+      return this.topicRetentionMs;
+    }
+    const raw = this.env.RETENTION_DURATION_MS;
+    if (!raw) return 0;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+    return Math.trunc(parsed);
+  }
+
+  private computeExpiresFromBody(expiresValue: number | undefined): number | undefined {
+    if (expiresValue === undefined) {
+      const retention = this.retentionDurationMs();
+      if (retention <= 0) return undefined;
+      return unixNow() + Math.floor(retention / 1000);
+    }
+    if (expiresValue < 1e9) {
+      return unixNow() + Math.floor(expiresValue);
+    }
+    if (expiresValue < 1e12) {
+      return Math.floor(expiresValue);
+    }
+    return Math.floor(expiresValue / 1000);
+  }
+
+  private pruneByTime(nowMs: number): number {
+    const nowSec = Math.floor(nowMs / 1000);
+    const before = this.replayBuffer.length;
+    this.replayBuffer = this.replayBuffer.filter((e) => {
+      if (e.expires && e.expires <= nowSec) return false;
+      const retention = this.retentionDurationMs();
+      if (retention > 0) {
+        const cutoff = nowSec - Math.floor(retention / 1000);
+        if (e.time < cutoff) return false;
+      }
+      return true;
+    });
+    return before - this.replayBuffer.length;
   }
 
   override async fetch(request: Request): Promise<Response> {
@@ -441,6 +617,30 @@ export class TopicHub extends DurableObject<Env> {
       return this.handlePublishJson(request);
     }
 
+    if (url.pathname === "/delete-message" && request.method === "POST") {
+      return this.handleDeleteMessage(request);
+    }
+
+    if (url.pathname === "/delete-all-messages" && request.method === "POST") {
+      return this.handleDeleteAllMessages(request);
+    }
+
+    if (url.pathname === "/messages" && request.method === "GET") {
+      return this.handleMessages(request);
+    }
+
+    if (url.pathname === "/poll" && request.method === "GET") {
+      return this.handlePoll(request);
+    }
+
+    if (url.pathname === "/retention" && request.method === "PUT") {
+      return this.handleRetention(request);
+    }
+
+    if (url.pathname === "/permissions" && request.method === "PUT") {
+      return this.handlePermissions(request);
+    }
+
     return json({ code: 404, error: "not found" }, { status: 404 });
   }
 
@@ -451,6 +651,10 @@ export class TopicHub extends DurableObject<Env> {
     const lastEventId = request.headers.get("x-last-event-id") || undefined;
     const sinceParam = request.headers.get("x-since-param") || undefined;
     const maxSubscribers = this.maxSubscribersPerTopic();
+
+    if (this.topicPermission === "read-only" || this.topicPermission === "none") {
+      return json({ code: 403, error: "read access denied" }, { status: 403 });
+    }
 
     if (this.subscribers.size >= maxSubscribers) {
       console.log(
@@ -552,6 +756,7 @@ export class TopicHub extends DurableObject<Env> {
     });
 
     if (lastEventId || sinceParam) {
+      this.pruneByTime(Date.now());
       const sinceTime = this.resolveSinceTime(lastEventId, sinceParam);
       const missedEvents = this.getReplayEvents(sinceTime);
       for (const event of missedEvents) {
@@ -569,7 +774,6 @@ export class TopicHub extends DurableObject<Env> {
         "cache-control": "no-cache, no-store, must-revalidate",
         "connection": "keep-alive",
         "x-accel-buffering": "no",
-        "X-Accel-Buffering": "no",
       },
     });
   }
@@ -672,6 +876,7 @@ export class TopicHub extends DurableObject<Env> {
   private handleStats(request: Request): Response {
     const topic = request.headers.get("x-topic") || this.ctx.id.toString();
     this.pruneRecentPublishes(Date.now());
+    this.pruneByTime(Date.now());
 
     const stats: TopicStats = {
       topic,
@@ -692,6 +897,10 @@ export class TopicHub extends DurableObject<Env> {
     const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
     const userAgent = request.headers.get("user-agent") || "unknown";
     const topic = request.headers.get("x-topic") || this.ctx.id.toString();
+
+    if (this.topicPermission === "write-only" || this.topicPermission === "none") {
+      return json({ code: 403, error: "write access denied" }, { status: 403 });
+    }
 
     const nowMs = Date.now();
     this.pruneRecentPublishes(nowMs);
@@ -724,19 +933,32 @@ export class TopicHub extends DurableObject<Env> {
     }
     this.recentPublishTimestamps.push(nowMs);
 
-    const body = (await request.json()) as {
+    const rawBody = await request.text();
+    let body: {
       topic: string;
       message: string;
       title?: string;
+      expires?: number;
     };
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return json({ code: 400, error: "invalid JSON" }, { status: 400 });
+    }
+
+    if (!body.message) {
+      return json({ code: 400, error: "message is required" }, { status: 400 });
+    }
 
     const event: PublishEvent = {
       id: makeId(),
       time: unixNow(),
       event: "message",
-      topic: body.topic,
+      topic: body.topic || topic,
       message: body.message,
       ...(body.title ? { title: body.title } : {}),
+      ...(this.computeExpiresFromBody(body.expires) !== undefined
+        ? { expires: this.computeExpiresFromBody(body.expires) } : {}),
     };
 
     const sseFrame = new TextEncoder().encode(toSseFrame("message", event, event.id));
@@ -816,11 +1038,19 @@ export class TopicHub extends DurableObject<Env> {
     }
     this.recentPublishTimestamps.push(nowMs);
 
-    const body = (await request.json()) as JsonPublishBody;
+    const rawBody = await request.text();
+    let body: JsonPublishBody;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return json({ code: 400, error: "invalid JSON" }, { status: 400 });
+    }
 
     if (!body.message) {
       return json({ code: 400, error: "message is required" }, { status: 400 });
     }
+
+    const computedExpires = this.computeExpiresFromBody(body.expires);
 
     const event: PublishEvent = {
       id: makeId(),
@@ -832,6 +1062,7 @@ export class TopicHub extends DurableObject<Env> {
       ...(body.priority !== undefined ? { priority: body.priority } : {}),
       ...(body.tags ? { tags: body.tags } : {}),
       ...(body.click ? { click: body.click } : {}),
+      ...(computedExpires !== undefined ? { expires: computedExpires } : {}),
     };
 
     const sseFrame = new TextEncoder().encode(toSseFrame("message", event, event.id));
@@ -904,6 +1135,271 @@ export class TopicHub extends DurableObject<Env> {
       }
     }
     return 0;
+  }
+
+  private async handleDeleteMessage(request: Request): Promise<Response> {
+    const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
+    const userAgent = request.headers.get("user-agent") || "unknown";
+    const topic = request.headers.get("x-topic") || this.ctx.id.toString();
+    const messageId = request.headers.get("x-message-id") || "";
+
+    if (!messageId) {
+      return json({ code: 400, error: "messageId is required" }, { status: 400 });
+    }
+
+    const messageIndex = this.replayBuffer.findIndex((e) => e.id === messageId);
+    if (messageIndex === -1) {
+      return json({ code: 404, error: "message not found" }, { status: 404 });
+    }
+
+    this.replayBuffer.splice(messageIndex, 1);
+
+    const deleteEvent: DeleteEvent = {
+      id: makeId(),
+      time: unixNow(),
+      event: "delete",
+      topic,
+      messageId,
+    };
+
+    const sseFrame = new TextEncoder().encode(toSseFrame("delete", deleteEvent, deleteEvent.id));
+    const wsFrame = JSON.stringify(deleteEvent);
+
+    const dead: string[] = [];
+    await Promise.all(
+      [...this.subscribers.entries()].map(async ([id, sub]) => {
+        try {
+          if (sub.kind === "sse") {
+            await sub.writer.write(sseFrame);
+          } else {
+            sub.socket.send(wsFrame);
+          }
+        } catch {
+          if (sub.keepalive) clearInterval(sub.keepalive);
+          dead.push(id);
+        }
+      }),
+    );
+
+    for (const id of dead) {
+      this.subscribers.delete(id);
+    }
+
+    console.log(
+      JSON.stringify({
+        event: "delete",
+        topic,
+        messageId,
+        subscribers: this.subscribers.size,
+        deadSubscribers: dead.length,
+        clientIp,
+        userAgent,
+      }),
+    );
+
+    return json(deleteEvent, { status: 200 });
+  }
+
+  private async handleDeleteAllMessages(request: Request): Promise<Response> {
+    const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
+    const userAgent = request.headers.get("user-agent") || "unknown";
+    const topic = request.headers.get("x-topic") || this.ctx.id.toString();
+
+    const deletedCount = this.replayBuffer.length;
+    this.replayBuffer = [];
+    this.publishedCount = 0;
+
+    const deleteAllEvent: DeleteAllEvent = {
+      id: makeId(),
+      time: unixNow(),
+      event: "delete_all",
+      topic,
+    };
+
+    const sseFrame = new TextEncoder().encode(toSseFrame("delete_all", deleteAllEvent, deleteAllEvent.id));
+    const wsFrame = JSON.stringify(deleteAllEvent);
+
+    const dead: string[] = [];
+    await Promise.all(
+      [...this.subscribers.entries()].map(async ([id, sub]) => {
+        try {
+          if (sub.kind === "sse") {
+            await sub.writer.write(sseFrame);
+          } else {
+            sub.socket.send(wsFrame);
+          }
+        } catch {
+          if (sub.keepalive) clearInterval(sub.keepalive);
+          dead.push(id);
+        }
+      }),
+    );
+
+    for (const id of dead) {
+      this.subscribers.delete(id);
+    }
+
+    console.log(
+      JSON.stringify({
+        event: "delete_all",
+        topic,
+        deletedCount,
+        subscribers: this.subscribers.size,
+        deadSubscribers: dead.length,
+        clientIp,
+        userAgent,
+      }),
+    );
+
+    return json({ ...deleteAllEvent, deletedCount }, { status: 200 });
+  }
+
+  private handleMessages(request: Request): Response {
+    const topic = request.headers.get("x-topic") || this.ctx.id.toString();
+    this.pruneByTime(Date.now());
+
+    const messages = this.replayBuffer.map((event) => ({
+      id: event.id,
+      time: event.time,
+      message: event.message,
+      ...(event.title ? { title: event.title } : {}),
+      ...(event.priority !== undefined ? { priority: event.priority } : {}),
+      ...(event.tags ? { tags: event.tags } : {}),
+    }));
+
+    return json({
+      topic,
+      messages,
+      count: messages.length,
+    }, { status: 200 });
+  }
+
+  private async handlePoll(request: Request): Promise<Response> {
+    const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
+    const userAgent = request.headers.get("user-agent") || "unknown";
+    const topic = request.headers.get("x-topic") || this.ctx.id.toString();
+    const pollParam = request.headers.get("x-poll") || "30";
+    const sinceParam = request.headers.get("x-since-param") || undefined;
+
+    const pollMs = Math.min(Math.max(Number(pollParam) * 1000, 1000), 60000);
+    const sinceTime = sinceParam ? Number(sinceParam) : 0;
+    const deadline = Date.now() + pollMs;
+
+    while (Date.now() < deadline) {
+      const newMessages = this.replayBuffer.filter((e) => e.time > sinceTime);
+      if (newMessages.length > 0) {
+        const messages = newMessages.map((event) => ({
+          id: event.id,
+          time: event.time,
+          message: event.message,
+          ...(event.title ? { title: event.title } : {}),
+          ...(event.priority !== undefined ? { priority: event.priority } : {}),
+          ...(event.tags ? { tags: event.tags } : {}),
+        }));
+
+        console.log(
+          JSON.stringify({
+            event: "poll_response",
+            topic,
+            messageCount: messages.length,
+            clientIp,
+            userAgent,
+          }),
+        );
+
+        return json({
+          topic,
+          messages,
+          count: messages.length,
+        }, { status: 200 });
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    console.log(
+      JSON.stringify({
+        event: "poll_timeout",
+        topic,
+        pollMs,
+        clientIp,
+        userAgent,
+      }),
+    );
+
+    return json({
+      topic,
+      messages: [],
+      count: 0,
+      timeout: true,
+    }, { status: 200 });
+  }
+
+  private async handleRetention(request: Request): Promise<Response> {
+    const topic = request.headers.get("x-topic") || this.ctx.id.toString();
+
+    const rawBody = await request.text();
+    let body: { duration?: number };
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return json({ code: 400, error: "invalid JSON" }, { status: 400 });
+    }
+
+    if (body.duration === undefined || typeof body.duration !== "number" || body.duration < 0) {
+      return json({ code: 400, error: "duration must be a non-negative number (milliseconds)" }, { status: 400 });
+    }
+
+    this.topicRetentionMs = Math.trunc(body.duration);
+
+    console.log(
+      JSON.stringify({
+        event: "retention_set",
+        topic,
+        durationMs: this.topicRetentionMs,
+      }),
+    );
+
+    return json({
+      topic,
+      retentionDurationMs: this.topicRetentionMs,
+    }, { status: 200 });
+  }
+
+  private async handlePermissions(request: Request): Promise<Response> {
+    const topic = request.headers.get("x-topic") || this.ctx.id.toString();
+
+    const rawBody = await request.text();
+    let body: { permission?: string };
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return json({ code: 400, error: "invalid JSON" }, { status: 400 });
+    }
+
+    if (!body.permission) {
+      return json({ code: 400, error: "permission is required" }, { status: 400 });
+    }
+
+    const validPermissions = ["read-write", "read-only", "write-only", "none"];
+    if (!validPermissions.includes(body.permission)) {
+      return json({ code: 400, error: `permission must be one of: ${validPermissions.join(", ")}` }, { status: 400 });
+    }
+
+    this.topicPermission = body.permission as "read-write" | "read-only" | "write-only" | "none";
+
+    console.log(
+      JSON.stringify({
+        event: "permission_set",
+        topic,
+        permission: this.topicPermission,
+      }),
+    );
+
+    return json({
+      topic,
+      permission: this.topicPermission,
+    }, { status: 200 });
   }
 
   private pruneRecentPublishes(nowMs: number): void {

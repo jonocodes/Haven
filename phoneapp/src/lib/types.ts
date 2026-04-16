@@ -28,6 +28,7 @@ export type MediaItem = {
   metadataPath: string
   thumbnailPath: string | null
   thumbnailUrl: string | null
+  videoUrl: string | null
 
   createdAt: string
   updatedAt: string
@@ -54,5 +55,6 @@ export type Settings = {
   imageQuality: number
   maxDimension: number
   gpsEnabled: boolean
+  videoEnabled: boolean
   rsConnected: boolean
 }

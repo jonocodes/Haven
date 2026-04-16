@@ -1,4 +1,4 @@
-# Haven Phone App
+# My Photos
 
 An offline-first media capture web app built with React, TypeScript, Vite, TanStack Router, Dexie, and remoteStorage.js.
 

@@ -1,8 +1,68 @@
 import { useParams, useNavigate } from '@tanstack/react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { toast } from 'sonner'
 import { getMedia, renameMedia, softDeleteMedia } from '../lib/mediaRepository'
+import { getMediaBlob } from '../lib/db'
 import { formatBytes } from '../lib/imageProcessing'
 import { useState } from 'react'
+
+async function downloadMedia(item: { id: string; originalFilename: string; kind: 'photo' | 'video'; mimeType: string }) {
+  const blob = await getMediaBlob(item.id)
+  if (!blob) {
+    toast.error('Failed to download - file not found')
+    return
+  }
+  
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = item.originalFilename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+  toast.success(`Downloaded ${item.originalFilename}`)
+}
+
+async function shareMedia(item: { id: string; originalFilename: string; name: string | null; kind: 'photo' | 'video'; mimeType: string }) {
+  const blob = await getMediaBlob(item.id)
+  if (!blob) {
+    toast.error('Failed to share - file not found')
+    return
+  }
+
+  const filename = item.name || item.originalFilename
+  const file = new File([blob], filename, { type: item.mimeType })
+
+  if (navigator.share && navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({
+        title: filename,
+        files: [file]
+      })
+      toast.success('Shared successfully')
+      return
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') return
+    }
+  }
+
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: filename,
+        text: `Check out this ${item.kind}`,
+        url: URL.createObjectURL(blob)
+      })
+      toast.success('Shared successfully')
+      return
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') return
+    }
+  }
+
+  downloadMedia(item)
+}
 
 export function MediaDetail() {
   const { mediaId } = useParams({ from: '/media/$mediaId' })
@@ -29,6 +89,9 @@ export function MediaDetail() {
     try {
       await renameMedia(mediaId, name.trim())
       setEditing(false)
+      toast.success('Renamed successfully')
+    } catch {
+      toast.error('Failed to rename')
     } finally {
       setSaving(false)
     }
@@ -39,7 +102,10 @@ export function MediaDetail() {
     setSaving(true)
     try {
       await softDeleteMedia(mediaId)
+      toast.success('Deleted successfully')
       navigate({ to: '/gallery' })
+    } catch {
+      toast.error('Failed to delete')
     } finally {
       setSaving(false)
     }
@@ -55,7 +121,14 @@ export function MediaDetail() {
       <h1>{item.name || item.originalFilename}</h1>
       
       <div className="media-preview">
-        {item.thumbnailUrl ? (
+        {item.kind === 'video' && item.videoUrl ? (
+          <video 
+            src={item.videoUrl} 
+            controls 
+            className="media-preview-video"
+            playsInline
+          />
+        ) : item.thumbnailUrl ? (
           <img 
             src={item.thumbnailUrl} 
             alt={item.name || item.originalFilename}
@@ -85,6 +158,8 @@ export function MediaDetail() {
       ) : (
         <div className="detail-actions">
           <button onClick={startEditing}>Rename</button>
+          <button onClick={() => shareMedia(item)}>↗ Share</button>
+          <button onClick={() => downloadMedia(item)}>⬇ Download</button>
         </div>
       )}
       
@@ -94,8 +169,15 @@ export function MediaDetail() {
           <dt>Name</dt>
           <dd>{item.name || '(none)'}</dd>
           
-          <dt>Dimensions</dt>
-          <dd>{item.width} × {item.height}</dd>
+          <dt>Type</dt>
+          <dd>{item.kind === 'video' ? 'Video' : 'Photo'}</dd>
+          
+          {item.width && item.height && (
+            <>
+              <dt>Dimensions</dt>
+              <dd>{item.width} × {item.height}</dd>
+            </>
+          )}
           
           <dt>File Size</dt>
           <dd>{formatBytes(item.fileSizeBytes)}</dd>

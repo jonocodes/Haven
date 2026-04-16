@@ -13,13 +13,15 @@
 - [x] Auth query param compatibility
 - [x] Richer publish metadata (priority, tags, click, etc.)
 - [x] Better SSE compatibility details
-- [ ] Basic topic permissions split (read vs write)
+- [x] Basic topic permissions split (read vs write)
 
 ## Phase 3 — Features (1–2 weeks)
 
-- [ ] Persistent message history
-- [ ] Durable per-topic retention
-- [ ] Delete/update semantics
+- [x] Delete message semantics (single + all)
+- [x] List messages endpoint
+- [x] Poll endpoint
+- [x] Time-based cache (cache-duration)
+- [x] Durable per-topic retention
 - [ ] Attachments, actions, delayed delivery
 - [ ] Proper user/accounts/access control
 - [ ] More complete ntfy-compatible API surface

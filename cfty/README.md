@@ -57,6 +57,8 @@ client → POST /topic → Durable Object → broadcast → SSE clients
 - `PUT /:topic/json` → publish JSON message (ntfy-compatible)
 - `GET /:topic/sse` → subscribe via SSE
 - `GET /:topic` → topic stats
+- `PUT /:topic/retention` → set per-topic retention duration
+- `PUT /:topic/permissions` → set per-topic permissions (read/write)
 - live-only (no storage)
 - per-topic rate limiting
 - structured logs
@@ -161,6 +163,186 @@ Body = JSON object:
 ```
 
 All fields are optional. `message` is required.
+
+---
+
+## Poll for Messages
+
+```
+GET /:topic?poll=<seconds>
+```
+
+Long-poll endpoint that waits for new messages. Use instead of SSE when HTTP long-polling is preferred.
+
+Parameters:
+- `poll` (required): Maximum seconds to wait (1-60)
+- `since` (optional): Unix timestamp - only return messages after this time
+
+Response (when messages arrive):
+
+```json
+{
+  "topic": "my-topic",
+  "messages": [
+    {
+      "id": "abc123",
+      "time": 1700000000,
+      "message": "hello"
+    }
+  ],
+  "count": 1
+}
+```
+
+Response (when timeout):
+
+```json
+{
+  "topic": "my-topic",
+  "messages": [],
+  "count": 0,
+  "timeout": true
+}
+```
+
+---
+
+## Delete Message
+
+```
+DELETE /:topic/messages/:messageId
+```
+
+Deletes a message from the replay buffer and notifies subscribers via a `delete` event.
+
+Response:
+
+```json
+{
+  "id": "abc123",
+  "time": 1700000000,
+  "event": "delete",
+  "topic": "my-topic",
+  "messageId": "xyz789"
+}
+```
+
+If the message is not found in the buffer, returns `404`.
+
+---
+
+## Delete All Messages
+
+```
+DELETE /:topic/messages
+```
+
+Clears all messages from the replay buffer, resets the published count, and notifies subscribers via a `delete_all` event.
+
+Response:
+
+```json
+{
+  "id": "abc123",
+  "time": 1700000000,
+  "event": "delete_all",
+  "topic": "my-topic",
+  "deletedCount": 42
+}
+```
+
+---
+
+## Set Retention
+
+```
+PUT /:topic/retention
+```
+
+Sets the message retention duration for a topic. Messages older than the retention period are automatically pruned.
+
+Request body:
+
+```json
+{
+  "duration": 3600000
+}
+```
+
+- `duration`: Retention duration in **milliseconds**
+- Setting `duration: 0` disables time-based retention for this topic
+- The global `RETENTION_DURATION_MS` env var provides a default if not set per-topic
+
+Response:
+
+```json
+{
+  "topic": "my-topic",
+  "retentionDurationMs": 3600000
+}
+```
+
+When a topic has retention configured, published messages automatically get an `expires` field set based on the retention period. You can also override this per-message using the `expires` field in JSON publish body.
+
+---
+
+## Set Permissions
+
+```
+PUT /:topic/permissions
+```
+
+Sets the access permissions for a topic (read vs write access).
+
+Request body:
+
+```json
+{
+  "permission": "read-write"
+}
+```
+
+- `permission`: One of:
+  - `read-write` (default) - allow both publish and subscribe
+  - `read-only` - allow only subscribe (denies publish)
+  - `write-only` - allow only publish (denies subscribe)
+  - `none` - deny both read and write
+
+Response:
+
+```json
+{
+  "topic": "my-topic",
+  "permission": "read-only"
+}
+```
+
+---
+
+## List Messages
+
+```
+GET /:topic/messages
+```
+
+Returns the messages currently in the replay buffer.
+
+Response:
+
+```json
+{
+  "topic": "my-topic",
+  "messages": [
+    {
+      "id": "abc123",
+      "time": 1700000000,
+      "message": "hello",
+      "title": "My Title"
+    }
+  ],
+  "count": 1
+}
+```
 
 ---
 
@@ -314,6 +496,7 @@ https://<your-name>.workers.dev
   "observability": { "enabled": true },
   "vars": {
     "MAX_SUBSCRIBERS_PER_TOPIC": "100",
+    "CACHE_DURATION_MS": "43200000",
     "AUTH_ENABLED": "true",
     "BASIC_AUTH_USER": "admin",
     "BASIC_AUTH_PASS": "change-me",
@@ -329,6 +512,18 @@ https://<your-name>.workers.dev
   ]
 }
 ```
+
+**Environment Variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MAX_SUBSCRIBERS_PER_TOPIC` | `100` | Max concurrent subscribers per topic |
+| `CACHE_DURATION_MS` | `0` (infinite) | Time-based message expiry in ms (e.g. `43200000` = 12h) |
+| `RETENTION_DURATION_MS` | `0` (infinite) | Default per-topic message retention in ms |
+| `AUTH_ENABLED` | `true` | Enable/disable auth |
+| `BASIC_AUTH_USER` | - | Basic auth username |
+| `BASIC_AUTH_PASS` | - | Basic auth password |
+| `BEARER_AUTH_TOKEN` | - | Bearer auth token |
 
 ---
 
@@ -447,13 +642,13 @@ if (this.subscribers.size >= MAX_SUBSCRIBERS) {
 
 Optional, but usually not necessary for a live-only service.
 
-### 3. Manual cleanup endpoint
+### 3. Delete message endpoint
 
 ```
-DELETE /:topic
+DELETE /:topic/messages/:messageId
 ```
 
-Not currently implemented.
+Removes a message from the replay buffer and notifies subscribers.
 
 ---
 
@@ -471,7 +666,11 @@ Not currently implemented.
 | `GET /:topic/sse` | ✅ | SSE subscriptions |
 | `GET /:topic/ws` | ✅ | WebSocket subscriptions |
 | `GET /:topic` | ✅ | Topic stats |
+| `GET /:topic?poll=<s>` | ✅ | Long-poll for messages |
+| `GET /:topic/messages` | ✅ | List messages in buffer |
 | `GET /:topic/auth` | ✅ | Auth check |
+| `DELETE /:topic/messages/:id` | ✅ | Delete message from buffer |
+| `DELETE /:topic/messages` | ✅ | Delete all messages from buffer |
 
 ### Features
 | Feature | Status | Notes |
@@ -480,9 +679,15 @@ Not currently implemented.
 | Subscriber cap | ✅ | Configurable via `MAX_SUBSCRIBERS_PER_TOPIC` |
 | Basic auth | ✅ | Header + query param |
 | Bearer auth | ✅ | Header + query param |
-| Replay buffer | ✅ | Up to 100 messages, `?since=` or `Last-Event-ID` |
+| Replay buffer | ✅ | Up to 100 messages OR time-based via `CACHE_DURATION_MS` |
 | Rich message metadata | ✅ | `priority`, `tags`, `click` via `/json` |
 | CORS | ✅ | Full CORS headers |
+| Delete message | ✅ | Removes from buffer, notifies subscribers |
+| Delete all messages | ✅ | Clears buffer, resets count, notifies |
+| Long-poll | ✅ | `?poll=<seconds>` wait for messages |
+| Time-based cache | ✅ | `CACHE_DURATION_MS` auto-expires messages |
+| Per-topic retention | ✅ | `PUT /:topic/retention` + `RETENTION_DURATION_MS` |
+| Per-topic permissions | ✅ | `PUT /:topic/permissions` (read/write/none) |
 
 ---
 
@@ -495,7 +700,6 @@ Not currently implemented.
 | Message attachments | ❌ | Out of scope |
 | Message actions/buttons | ❌ | Out of scope |
 | Message delivery delays | ❌ | Out of scope |
-| Delete/update semantics | ❌ | No message modification |
 | Per-topic access control | ❌ | Global auth only |
 | User accounts | ❌ | No user system |
 
@@ -515,6 +719,45 @@ Not currently implemented.
 | Topic signing (HMAC) | ❌ | Future consideration |
 | gzip compression | ❌ | Future consideration |
 | WebSocket to SSE bridge | ❌ | Already implemented via `/ws` |
+
+---
+
+## ✅ cfty-only Features
+
+These are features unique to cfty that ntfy does not offer:
+
+### Cloudflare Workers + Durable Objects
+
+| Feature | Description |
+|---------|-------------|
+| Edge-native deployment | Runs on Cloudflare's global network |
+| Automatic scaling | Durable Objects handle concurrency |
+| Stateless publish/subscribe | No database required for core operation |
+| Replay buffer | Up to 100 messages (configurable) |
+
+### Per-Topic Configuration
+
+| Feature | Description |
+|---------|-------------|
+| `PUT /:topic/retention` | Set per-topic message retention duration |
+| `MAX_SUBSCRIBERS_PER_TOPIC` | Configurable subscriber cap per topic |
+| `REPLAY_BUFFER_SIZE` | Configurable message buffer size |
+
+### Extended SSE Features
+
+| Feature | Description |
+|---------|-------------|
+| WebSocket endpoint | `GET /:topic/ws` for native WebSocket clients |
+| Built-in keepalive | 25s interval (configurable) |
+| Poll timeout | `?poll=<seconds>` long-poll with timeout response |
+
+### Enhanced Observability
+
+| Feature | Description |
+|---------|-------------|
+| Structured JSON logs | All events logged as JSON objects |
+| Stats endpoint | `GET /:topic` returns subscriber count, publish count, rate limit info |
+| Rate limit headers | `Retry-After` header on 429 responses |
 
 ---
 

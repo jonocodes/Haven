@@ -29,13 +29,14 @@ export function getMediaClient() {
 export async function storeMediaFile(
   id: string, 
   blob: Blob, 
-  filename: string
+  filename: string,
+  mimeType?: string
 ): Promise<string> {
   const client = getMediaClient()
   const path = `items/${id}/${filename}`
   const arrayBuffer = await blob.arrayBuffer()
   
-  return client.storeFile('image/jpeg', path, arrayBuffer)
+  return client.storeFile(mimeType || blob.type || 'application/octet-stream', path, arrayBuffer)
 }
 
 export async function storeMetadata(id: string, metadata: MediaItem): Promise<string> {
