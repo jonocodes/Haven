@@ -3,6 +3,8 @@ import { FormEvent, useEffect, useState } from 'react'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { getSetting, setSetting } from '../lib/db'
+import { pushSyncedSettings, type SyncedSettings } from '../lib/remotestorage'
+import { getDeviceId } from '../lib/notify'
 
 const DEFAULT_PULL_SECONDS = 5
 const MIN_PULL_SECONDS = 1
@@ -55,7 +57,6 @@ function PreferencesPage() {
     }
 
     void loadPrefs()
-
     return () => {
       cancelled = true
     }
@@ -67,12 +68,27 @@ function PreferencesPage() {
 
     try {
       const normalizedPullSeconds = clampPullSeconds(Number(pullSeconds))
+      const now = new Date().toISOString()
+      const deviceId = await getDeviceId()
+
+      const syncedSettings: SyncedSettings = {
+        version: 1,
+        updatedAt: now,
+        updatedBy: deviceId,
+        ntfy: {
+          enabled: ntfyEnabled,
+          serverUrl: ntfyServerUrl.trim() || DEFAULT_NTFY_SERVER,
+          topic: ntfyTopic.trim(),
+        },
+      }
+
       await Promise.all([
         setSetting('pullIntervalSeconds', String(normalizedPullSeconds)),
         setSetting('ntfyEnabled', String(ntfyEnabled)),
         setSetting('ntfyServerUrl', ntfyServerUrl.trim() || DEFAULT_NTFY_SERVER),
         setSetting('ntfyTopic', ntfyTopic.trim()),
         setSetting('highlightIncomingChanges', String(highlightIncomingChanges)),
+        pushSyncedSettings(syncedSettings),
       ])
       setPullSeconds(String(normalizedPullSeconds))
       setStatus('saved')
@@ -90,6 +106,14 @@ function PreferencesPage() {
         <h1 className="text-2xl font-semibold">Preferences</h1>
       </div>
 
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+        <p className="text-sm text-blue-800">
+          <strong>Some settings sync across your devices.</strong> Shared settings are stored via your remoteStorage account
+          and include ntfy configuration. These are automatically shared so all your devices use the same topic for
+          real-time notifications.
+        </p>
+      </div>
+
       <form className="space-y-5" onSubmit={handleSave}>
         <label className="block">
           <span className="text-sm font-medium text-gray-700">Pull frequency (seconds)</span>
@@ -102,7 +126,7 @@ function PreferencesPage() {
             onChange={(e) => setPullSeconds(e.target.value)}
             className="mt-2 w-48"
           />
-          <p className="mt-1 text-xs text-gray-500">Controls periodic remoteStorage pull cadence (1-300s).</p>
+          <p className="mt-1 text-xs text-gray-500">Controls periodic remoteStorage pull cadence (1-300s). This setting is local to this device.</p>
         </label>
 
         <label className="block">
@@ -113,7 +137,7 @@ function PreferencesPage() {
               checked={ntfyEnabled}
               onChange={(e) => setNtfyEnabled(e.target.checked)}
             />
-            <span className="text-sm text-gray-600">Enable ntfy publish/subscribe wake-up behavior.</span>
+            <span className="text-sm text-gray-600">Enable ntfy publish/subscribe wake-up behavior. <strong>This syncs across devices.</strong></span>
           </div>
         </label>
 
@@ -127,6 +151,7 @@ function PreferencesPage() {
             className="mt-2 w-full"
             disabled={!ntfyEnabled}
           />
+          <p className="mt-1 text-xs text-gray-500">Server for ntfy notifications. <strong>Syncs across devices.</strong></p>
         </label>
 
         <label className="block">
@@ -139,6 +164,7 @@ function PreferencesPage() {
             className="mt-2 w-full"
             disabled={!ntfyEnabled}
           />
+          <p className="mt-1 text-xs text-gray-500">Unique topic name for this notes app. <strong>Syncs across devices — use the same topic on all devices.</strong></p>
         </label>
 
         <label className="block">

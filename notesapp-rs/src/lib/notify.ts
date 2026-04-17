@@ -15,11 +15,19 @@ const DEFAULT_NTFY_SERVER = 'https://ntfy.sh'
 
 let deviceIdPromise: Promise<string> | null = null
 let ntfyPublishCount = 0
+let ntfyReceiveCount = 0
 const publishCountListeners = new Set<(count: number) => void>()
+const receiveCountListeners = new Set<(count: number) => void>()
 
 function emitPublishCount(): void {
   for (const listener of publishCountListeners) {
     listener(ntfyPublishCount)
+  }
+}
+
+function emitReceiveCount(): void {
+  for (const listener of receiveCountListeners) {
+    listener(ntfyReceiveCount)
   }
 }
 
@@ -28,6 +36,14 @@ export function onNtfyPublishCountChange(listener: (count: number) => void): () 
   listener(ntfyPublishCount)
   return () => {
     publishCountListeners.delete(listener)
+  }
+}
+
+export function onNtfyReceiveCountChange(listener: (count: number) => void): () => void {
+  receiveCountListeners.add(listener)
+  listener(ntfyReceiveCount)
+  return () => {
+    receiveCountListeners.delete(listener)
   }
 }
 
@@ -140,6 +156,9 @@ export async function subscribeToNoteChanges(
       if (typeof parsed.noteId !== 'string') return
       if (parsed.op !== 'upsert' && parsed.op !== 'delete') return
       if (parsed.senderDeviceId === deviceId) return
+
+      ntfyReceiveCount += 1
+      emitReceiveCount()
 
       onMessage({
         type: 'note-changed',
