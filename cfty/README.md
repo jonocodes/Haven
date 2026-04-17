@@ -59,6 +59,9 @@ client → POST /topic → Durable Object → broadcast → SSE clients
 - `GET /:topic` → topic stats
 - `PUT /:topic/retention` → set per-topic retention duration
 - `PUT /:topic/permissions` → set per-topic permissions (read/write)
+- `POST /:topic/subscribe` → subscribe to WebPush notifications
+- `POST /:topic/unsubscribe` → unsubscribe from WebPush
+- `GET /vapidPublicKey` → get VAPID public key for WebPush
 - live-only (no storage)
 - per-topic rate limiting
 - structured logs
@@ -319,6 +322,94 @@ Response:
 
 ---
 
+## WebPush (Browser Notifications)
+
+Enable browser push notifications so clients receive messages even when the page/app is closed.
+
+### Get VAPID Public Key
+
+```
+GET /vapidPublicKey
+```
+
+Returns the VAPID public key needed for browser subscription.
+
+Response:
+
+```json
+{
+  "publicKey": "BAXie0dPLoKzyqJ7xFxWV66j2i3QSEz0npKYHO_2MSP..."
+}
+```
+
+### Subscribe to Push Notifications
+
+```
+POST /:topic/subscribe
+```
+
+Request body (PushSubscription JSON from browser):
+
+```json
+{
+  "endpoint": "https://fcm.googleapis.com/fcm/send/...",
+  "keys": {
+    "p256dh": "...",
+    "auth": "..."
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "topic": "my-topic",
+  "subscribed": true,
+  "totalSubscriptions": 1
+}
+```
+
+### Unsubscribe
+
+```
+POST /:topic/unsubscribe
+```
+
+Same request body as subscribe.
+
+Response:
+
+```json
+{
+  "topic": "my-topic",
+  "unsubscribed": true,
+  "totalSubscriptions": 0
+}
+```
+
+### Browser Integration Example
+
+```javascript
+// Get the VAPID public key
+const { publicKey } = await fetch('/vapidPublicKey').then(r => r.json());
+
+// Subscribe to push notifications
+const registration = await navigator.serviceWorker.ready;
+const subscription = await registration.pushManager.subscribe({
+  userVisibleOnly: true,
+  applicationServerKey: publicKey
+});
+
+// Send subscription to cfty
+await fetch(`/my-topic/subscribe`, {
+  method: 'POST',
+  body: JSON.stringify(subscription.toJSON())
+});
+```
+
+---
+
 ## List Messages
 
 ```
@@ -524,6 +615,8 @@ https://<your-name>.workers.dev
 | `BASIC_AUTH_USER` | - | Basic auth username |
 | `BASIC_AUTH_PASS` | - | Basic auth password |
 | `BEARER_AUTH_TOKEN` | - | Bearer auth token |
+| `VAPID_PUBLIC_KEY` | - | VAPID public key for WebPush |
+| `VAPID_PRIVATE_KEY` | - | VAPID private key for WebPush |
 
 ---
 
@@ -688,6 +781,7 @@ Removes a message from the replay buffer and notifies subscribers.
 | Time-based cache | ✅ | `CACHE_DURATION_MS` auto-expires messages |
 | Per-topic retention | ✅ | `PUT /:topic/retention` + `RETENTION_DURATION_MS` |
 | Per-topic permissions | ✅ | `PUT /:topic/permissions` (read/write/none) |
+| WebPush notifications | ✅ | Browser push via `/subscribe` + VAPID keys |
 
 ---
 

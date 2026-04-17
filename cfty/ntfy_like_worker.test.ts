@@ -562,6 +562,56 @@ describe("cfty", () => {
     });
   });
 
+  describe("webpush", () => {
+    it("GET /vapidPublicKey returns 503 when not configured", async () => {
+      const res = await req("/vapidPublicKey");
+      expect(res.status).toBe(503);
+    });
+
+    it("POST /topic/subscribe stores push subscription", async () => {
+      const topic = "push-sub-" + Date.now();
+      const subscription = {
+        endpoint: "https://fcm.googleapis.com/fcm/send/test-endpoint",
+        keys: {
+          p256dh: "test-p256dh-key",
+          auth: "test-auth-key",
+        },
+      };
+      const res = await req(`/${topic}/subscribe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-topic": topic },
+        body: JSON.stringify(subscription),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json() as any;
+      expect(body.subscribed).toBe(true);
+    });
+
+    it("POST /topic/unsubscribe removes push subscription", async () => {
+      const topic = "push-unsub-" + Date.now();
+      const subscription = {
+        endpoint: "https://fcm.googleapis.com/fcm/send/test-endpoint-unsub",
+        keys: {
+          p256dh: "test-p256dh-key-unsub",
+          auth: "test-auth-key-unsub",
+        },
+      };
+      await req(`/${topic}/subscribe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-topic": topic },
+        body: JSON.stringify(subscription),
+      });
+      const unsubRes = await req(`/${topic}/unsubscribe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-topic": topic },
+        body: JSON.stringify(subscription),
+      });
+      expect(unsubRes.status).toBe(200);
+      const body = await unsubRes.json() as any;
+      expect(body.unsubscribed).toBe(true);
+    });
+  });
+
   describe("help text", () => {
     it("root lists all endpoints", async () => {
       const res = await req("/");

@@ -17,6 +17,10 @@
       {
         "name": "TOPIC_HUB",
         "class_name": "TopicHub"
+      },
+      {
+        "name": "PUSH_HUB",
+        "class_name": "PushHub"
       }
     ]
   },

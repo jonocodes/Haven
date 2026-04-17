@@ -12,5 +12,8 @@
     "@cloudflare/vitest-pool-workers": "^0.14.7",
     "vitest": "^4.1.4",
     "wrangler": "^4.0.0"
+  },
+  "dependencies": {
+    "web-push": "^3.6.7"
   }
 }

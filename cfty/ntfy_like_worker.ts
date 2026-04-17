@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import webpush from "web-push";
 
 // cfty — Cloudflare-based tiny ntfy-like service
 //
@@ -18,12 +19,16 @@ import { DurableObject } from "cloudflare:workers";
 
 export interface Env {
   TOPIC_HUB: DurableObjectNamespace<TopicHub>;
+  PUSH_HUB: DurableObjectNamespace<PushHub>;
   MAX_SUBSCRIBERS_PER_TOPIC?: string;
   CACHE_DURATION_MS?: string;
+  RETENTION_DURATION_MS?: string;
   AUTH_ENABLED?: string;
   BASIC_AUTH_USER?: string;
   BASIC_AUTH_PASS?: string;
   BEARER_AUTH_TOKEN?: string;
+  VAPID_PUBLIC_KEY?: string;
+  VAPID_PRIVATE_KEY?: string;
 }
 
 type PublishEvent = {
@@ -229,7 +234,7 @@ function makeId(): string {
 
 function parseTopicFromPath(
   pathname: string,
-): { topic: string; isSse: boolean; isWs: boolean; isAuth: boolean; isJson: boolean; isMessages?: boolean; messageId?: string; isDeleteAll?: boolean; isRetention?: boolean; isPermissions?: boolean } | null {
+): { topic: string; isSse: boolean; isWs: boolean; isAuth: boolean; isJson: boolean; isMessages?: boolean; messageId?: string; isDeleteAll?: boolean; isRetention?: boolean; isPermissions?: boolean; isSubscribe?: boolean; isUnsubscribe?: boolean } | null {
   const parts = pathname.split("/").filter(Boolean);
   if (parts.length === 1) {
     return { topic: parts[0], isSse: false, isWs: false, isAuth: false, isJson: false };
@@ -257,6 +262,12 @@ function parseTopicFromPath(
   }
   if (parts.length === 2 && parts[1] === "permissions") {
     return { topic: parts[0], isSse: false, isWs: false, isAuth: false, isJson: false, isPermissions: true };
+  }
+  if (parts.length === 2 && parts[1] === "subscribe") {
+    return { topic: parts[0], isSse: false, isWs: false, isAuth: false, isJson: false, isSubscribe: true };
+  }
+  if (parts.length === 2 && parts[1] === "unsubscribe") {
+    return { topic: parts[0], isSse: false, isWs: false, isAuth: false, isJson: false, isUnsubscribe: true };
   }
   return null;
 }
@@ -338,6 +349,14 @@ export default {
       );
     }
 
+    if (url.pathname === "/vapidPublicKey" && request.method === "GET") {
+      const publicKey = env.VAPID_PUBLIC_KEY;
+      if (!publicKey) {
+        return withCors(json({ error: "VAPID public key not configured" }, { status: 503 }));
+      }
+      return withCors(json({ publicKey }));
+    }
+
     const parsed = parseTopicFromPath(url.pathname);
     if (!parsed) {
       return withCors(json({ code: 404, error: "not found" }, { status: 404 }));
@@ -352,6 +371,8 @@ export default {
 
     const id = env.TOPIC_HUB.idFromName(topic);
     const stub = env.TOPIC_HUB.get(id);
+    const pushId = env.PUSH_HUB.idFromName(topic);
+    const pushStub = env.PUSH_HUB.get(pushId);
 
     if (parsed.isAuth && request.method === "GET") {
       return withCors(json({ success: true }));
@@ -449,6 +470,34 @@ export default {
       );
     }
 
+    if (parsed.isSubscribe && request.method === "POST") {
+      const rawBody = await request.text();
+      return withCors(
+        await pushStub.fetch("https://hub.internal/subscribe-push", {
+          method: "POST",
+          headers: {
+            "content-type": "text/plain",
+            "x-topic": topic,
+          },
+          body: rawBody,
+        }),
+      );
+    }
+
+    if (parsed.isUnsubscribe && request.method === "POST") {
+      const rawBody = await request.text();
+      return withCors(
+        await pushStub.fetch("https://hub.internal/unsubscribe-push", {
+          method: "POST",
+          headers: {
+            "content-type": "text/plain",
+            "x-topic": topic,
+          },
+          body: rawBody,
+        }),
+      );
+    }
+
     if (parsed.isJson && (request.method === "POST" || request.method === "PUT")) {
       const rawBody = await request.text();
       return withCors(
@@ -534,6 +583,11 @@ export class TopicHub extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+  }
+
+  private getPushHub(topic: string): PushHub {
+    const id = this.env.PUSH_HUB.idFromName(topic);
+    return this.env.PUSH_HUB.get(id);
   }
 
   private maxSubscribersPerTopic(): number {
@@ -1090,6 +1144,8 @@ export class TopicHub extends DurableObject<Env> {
       this.subscribers.delete(id);
     }
 
+    this.getPushHub(event.topic).sendToSubscribers(event.topic, event);
+
     console.log(
       JSON.stringify({
         event: "publish",
@@ -1185,11 +1241,13 @@ export class TopicHub extends DurableObject<Env> {
       this.subscribers.delete(id);
     }
 
+    this.getPushHub(deleteEvent.topic).sendToSubscribers(deleteEvent.topic, deleteEvent);
+
     console.log(
       JSON.stringify({
         event: "delete",
-        topic,
-        messageId,
+        topic: deleteEvent.topic,
+        messageId: deleteEvent.id,
         subscribers: this.subscribers.size,
         deadSubscribers: dead.length,
         clientIp,
@@ -1405,5 +1463,180 @@ export class TopicHub extends DurableObject<Env> {
   private pruneRecentPublishes(nowMs: number): void {
     const cutoff = nowMs - this.rateLimitWindowMs;
     this.recentPublishTimestamps = this.recentPublishTimestamps.filter((ts) => ts > cutoff);
+  }
+}
+
+type PushSubscriptionData = {
+  endpoint: string;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+};
+
+export class PushHub extends DurableObject<Env> {
+  private subscriptions = new Map<string, PushSubscriptionData[]>();
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+
+    if (url.pathname === "/subscribe-push" && request.method === "POST") {
+      return this.handleSubscribePush(request);
+    }
+
+    if (url.pathname === "/unsubscribe-push" && request.method === "POST") {
+      return this.handleUnsubscribePush(request);
+    }
+
+    return json({ code: 404, error: "not found" }, { status: 404 });
+  }
+
+  private async handleSubscribePush(request: Request): Promise<Response> {
+    const topic = request.headers.get("x-topic") || this.ctx.id.toString();
+    let body: PushSubscriptionData;
+    try {
+      const rawBody = await request.text();
+      body = JSON.parse(rawBody);
+    } catch {
+      return json({ code: 400, error: "invalid JSON" }, { status: 400 });
+    }
+
+    if (!body?.endpoint || !body?.keys?.p256dh || !body?.keys?.auth) {
+      return json({ code: 400, error: "invalid push subscription" }, { status: 400 });
+    }
+
+    const added = await this.addSubscription(topic, body);
+    return json({
+      topic,
+      subscribed: added,
+      totalSubscriptions: await this.getSubscriptionCount(topic),
+    });
+  }
+
+  private async handleUnsubscribePush(request: Request): Promise<Response> {
+    const topic = request.headers.get("x-topic") || this.ctx.id.toString();
+    let body: PushSubscriptionData;
+    try {
+      const rawBody = await request.text();
+      body = JSON.parse(rawBody);
+    } catch {
+      return json({ code: 400, error: "invalid JSON" }, { status: 400 });
+    }
+
+    if (!body?.endpoint || !body?.keys?.p256dh || !body?.keys?.auth) {
+      return json({ code: 400, error: "invalid push subscription" }, { status: 400 });
+    }
+
+    const removed = await this.removeSubscription(topic, body);
+    return json({
+      topic,
+      unsubscribed: removed,
+      totalSubscriptions: await this.getSubscriptionCount(topic),
+    });
+  }
+
+  async addSubscription(topic: string, sub: PushSubscriptionData): Promise<boolean> {
+    const existing = this.subscriptions.get(topic) || [];
+    const alreadyExists = existing.some(
+      (s) => s.endpoint === sub.endpoint && s.keys.p256dh === sub.keys.p256dh,
+    );
+    if (alreadyExists) {
+      return false;
+    }
+    existing.push(sub);
+    this.subscriptions.set(topic, existing);
+    console.log(
+      JSON.stringify({
+        event: "push_subscription_added",
+        topic,
+        endpoint: sub.endpoint,
+        totalSubscribers: existing.length,
+      }),
+    );
+    return true;
+  }
+
+  async removeSubscription(topic: string, sub: PushSubscriptionData): Promise<boolean> {
+    const existing = this.subscriptions.get(topic) || [];
+    const filtered = existing.filter(
+      (s) => !(s.endpoint === sub.endpoint && s.keys.p256dh === sub.keys.p256dh),
+    );
+    if (filtered.length === existing.length) {
+      return false;
+    }
+    if (filtered.length === 0) {
+      this.subscriptions.delete(topic);
+    } else {
+      this.subscriptions.set(topic, filtered);
+    }
+    console.log(
+      JSON.stringify({
+        event: "push_subscription_removed",
+        topic,
+        endpoint: sub.endpoint,
+        remainingSubscribers: filtered.length,
+      }),
+    );
+    return true;
+  }
+
+  async sendToSubscribers(topic: string, message: PublishEvent): Promise<void> {
+    const subs = this.subscriptions.get(topic);
+    if (!subs || subs.length === 0) {
+      return;
+    }
+
+    const publicKey = this.env.VAPID_PUBLIC_KEY;
+    const privateKey = this.env.VAPID_PRIVATE_KEY;
+
+    if (!publicKey || !privateKey) {
+      console.log(
+        JSON.stringify({
+          event: "push_skipped",
+          reason: "no_vapid_keys",
+          topic,
+        }),
+      );
+      return;
+    }
+
+    webpush.setVapidDetails("mailto:admin@example.com", publicKey, privateKey);
+
+    const payload = JSON.stringify(message);
+
+    for (const sub of subs) {
+      try {
+        await webpush.sendNotification(
+          {
+            endpoint: sub.endpoint,
+            keys: sub.keys,
+          } as any,
+          payload,
+        );
+      } catch (err: any) {
+        console.log(
+          JSON.stringify({
+            event: "push_notification_failed",
+            topic,
+            endpoint: sub.endpoint,
+            error: err?.message || String(err),
+          }),
+        );
+        if (err?.statusCode === 404 || err?.statusCode === 410) {
+          const existing = this.subscriptions.get(topic) || [];
+          const filtered = existing.filter((s) => s.endpoint !== sub.endpoint);
+          if (filtered.length === 0) {
+            this.subscriptions.delete(topic);
+          } else {
+            this.subscriptions.set(topic, filtered);
+          }
+        }
+      }
+    }
+  }
+
+  async getSubscriptionCount(topic: string): Promise<number> {
+    const subs = this.subscriptions.get(topic);
+    return subs ? subs.length : 0;
   }
 }
