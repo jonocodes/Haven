@@ -15,11 +15,19 @@ const DEFAULT_NTFY_SERVER = 'https://ntfy.sh'
 
 let deviceIdPromise: Promise<string> | null = null
 let ntfyPublishCount = 0
+let ntfyReceiveCount = 0
 const publishCountListeners = new Set<(count: number) => void>()
+const receiveCountListeners = new Set<(count: number) => void>()
 
 function emitPublishCount(): void {
   for (const listener of publishCountListeners) {
     listener(ntfyPublishCount)
+  }
+}
+
+function emitReceiveCount(): void {
+  for (const listener of receiveCountListeners) {
+    listener(ntfyReceiveCount)
   }
 }
 
@@ -31,13 +39,21 @@ export function onNtfyPublishCountChange(listener: (count: number) => void): () 
   }
 }
 
+export function onNtfyReceiveCountChange(listener: (count: number) => void): () => void {
+  receiveCountListeners.add(listener)
+  listener(ntfyReceiveCount)
+  return () => {
+    receiveCountListeners.delete(listener)
+  }
+}
+
 function createDeviceId(): string {
   const random = crypto.getRandomValues(new Uint8Array(12))
   const hex = Array.from(random, (value) => value.toString(16).padStart(2, '0')).join('')
   return `dvc_${hex}`
 }
 
-async function getDeviceId(): Promise<string> {
+export async function getDeviceId(): Promise<string> {
   if (!deviceIdPromise) {
     deviceIdPromise = (async () => {
       const existing = await getSetting(DEVICE_ID_SETTING)
@@ -102,6 +118,8 @@ export async function publishNoteChanged(noteId: string, op: NoteChangeOperation
     ts: Date.now(),
   }
 
+  console.log('[ntfy] publishing', payload, 'to', topicUrl)
+
   const response = await fetch(topicUrl, {
     method: 'POST',
     headers: {
@@ -118,6 +136,7 @@ export async function publishNoteChanged(noteId: string, op: NoteChangeOperation
 
   ntfyPublishCount += 1
   emitPublishCount()
+  console.log('[ntfy] published successfully')
 }
 
 export interface NtfySubscription {
@@ -131,15 +150,27 @@ export async function subscribeToNoteChanges(
   const { enabled, topicUrl, deviceId } = await getNotifyConfig()
   if (!enabled || !topicUrl) return null
 
-  const source = new EventSource(`${topicUrl}/json`)
+  const sseUrl = `${topicUrl}/sse?json=1`
+  console.log('[ntfy] connecting to', sseUrl)
+  const source = new EventSource(sseUrl)
 
   source.onmessage = (event: MessageEvent<string>) => {
     try {
-      const parsed = JSON.parse(event.data) as Partial<NoteChangedNotification>
+      console.log('[ntfy] received raw event:', event.data)
+      const ntfyMessage = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
+      const parsed = JSON.parse(ntfyMessage.message) as Partial<NoteChangedNotification>
+      console.log('[ntfy] received', parsed)
       if (parsed.type !== 'note-changed') return
       if (typeof parsed.noteId !== 'string') return
       if (parsed.op !== 'upsert' && parsed.op !== 'delete') return
-      if (parsed.senderDeviceId === deviceId) return
+      if (parsed.senderDeviceId === deviceId) {
+        console.log('[ntfy] ignoring our own message')
+        return
+      }
+
+      console.log('[ntfy] processing message for note', parsed.noteId, parsed.op)
+      ntfyReceiveCount += 1
+      emitReceiveCount()
 
       onMessage({
         type: 'note-changed',
@@ -154,6 +185,7 @@ export async function subscribeToNoteChanges(
   }
 
   source.onerror = (error) => {
+    console.log('[ntfy] EventSource error', error)
     onError?.(error)
   }
 

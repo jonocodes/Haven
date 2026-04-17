@@ -1,6 +1,8 @@
 import RemoteStorage from "remotestoragejs";
 import { createBodyState } from './crdt'
 import type { RemoteNote } from "./notes";
+import { getSetting } from './db'
+import { getRxCollections } from './rxdb'
 
 export const rs = new RemoteStorage({ logging: true });
 
@@ -14,6 +16,18 @@ function client() {
 
 const NOTES_PATH = "common/notes/";
 const TOMBSTONES_PATH = "common/tombstones/";
+const SYNCED_SETTINGS_PATH = "common/settings/sync.json";
+
+export interface SyncedSettings {
+  version: 1;
+  updatedAt: string;
+  updatedBy: string;
+  ntfy: {
+    enabled: boolean;
+    serverUrl: string;
+    topic: string;
+  };
+}
 
 export async function pushNote(note: RemoteNote): Promise<void> {
   await client().storeFile(
@@ -47,6 +61,41 @@ export async function pullAllNotes(): Promise<RemoteNote[]> {
   return notes.filter((n): n is RemoteNote => n !== null);
 }
 
+
+export async function pushSyncedSettings(settings: SyncedSettings): Promise<void> {
+  await client().storeFile(
+    "application/json",
+    SYNCED_SETTINGS_PATH,
+    JSON.stringify(settings),
+  );
+}
+
+export async function pullSyncedSettings(): Promise<SyncedSettings | null> {
+  const result = await client().getFile(SYNCED_SETTINGS_PATH);
+  if (!result?.data) return null;
+  return JSON.parse(result.data as string) as SyncedSettings;
+}
+
+export async function pullAndApplySyncedSettings(): Promise<SyncedSettings | null> {
+  const remote = await pullSyncedSettings();
+  if (!remote) return null;
+
+  const remoteUpdatedAt = new Date(remote.updatedAt).getTime();
+  const localUpdatedAtStr = await getSetting('syncedSettingsUpdatedAt');
+  const localUpdatedAt = localUpdatedAtStr ? new Date(localUpdatedAtStr).getTime() : 0;
+
+  if (remoteUpdatedAt > localUpdatedAt) {
+    const collections = await getRxCollections();
+    await Promise.all([
+      collections.settings.upsert({ key: 'ntfyEnabled', value: String(remote.ntfy.enabled) }),
+      collections.settings.upsert({ key: 'ntfyServerUrl', value: remote.ntfy.serverUrl }),
+      collections.settings.upsert({ key: 'ntfyTopic', value: remote.ntfy.topic }),
+      collections.settings.upsert({ key: 'syncedSettingsUpdatedAt', value: remote.updatedAt }),
+    ]);
+  }
+
+  return remote;
+}
 
 export async function hasRemoteTombstone(id: string): Promise<boolean> {
   const result = await client().getFile(`${TOMBSTONES_PATH}${id}.json`);
