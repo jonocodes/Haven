@@ -28,12 +28,16 @@ function DebugDrawer({
   ntfyEnabled,
   ntfyPushCount,
   ntfyReceiveCount,
+  ntfyServerUrl,
+  ntfyTopic,
 }: {
   connected: boolean
   pullSeconds: number
   ntfyEnabled: boolean
   ntfyPushCount: number
   ntfyReceiveCount: number
+  ntfyServerUrl: string
+  ntfyTopic: string
 }) {
   const [expanded, setExpanded] = useState(false)
   const [tick, setTick] = useState(0)
@@ -56,6 +60,12 @@ function DebugDrawer({
               <div>sync down <span className="text-blue-400">{formatRelativeTime(lastPullAt)}</span></div>
               <div>pull every {pullSeconds}s</div>
               <div>ntfy {ntfyEnabled ? <span className="text-green-400">on</span> : <span className="text-gray-500">off</span>}</div>
+              {ntfyEnabled && ntfyTopic && (
+                <>
+                  <div>server <span className="text-gray-400">{ntfyServerUrl.replace('https://', '')}</span></div>
+                  <div>topic <span className="text-yellow-400">{ntfyTopic}</span></div>
+                </>
+              )}
               <div>pub {ntfyPushCount}</div>
               <div>sub {ntfyReceiveCount}</div>
             </div>
@@ -78,8 +88,12 @@ function RootLayout() {
   const [ntfyReceiveCount, setNtfyReceiveCount] = useState(0)
   const pullIntervalSetting = useSetting('pullIntervalSeconds')
   const ntfyEnabledSetting = useSetting('ntfyEnabled')
+  const ntfyServerUrlSetting = useSetting('ntfyServerUrl')
+  const ntfyTopicSetting = useSetting('ntfyTopic')
   const pullSeconds = parsePullIntervalSeconds(pullIntervalSetting)
   const ntfyEnabled = ntfyEnabledSetting === 'true'
+  const ntfyServerUrl = ntfyServerUrlSetting || 'https://ntfy.sh'
+  const ntfyTopic = ntfyTopicSetting || ''
 
   useEffect(() => onNtfyPublishCountChange(setNtfyPushCount), [])
   useEffect(() => onNtfyReceiveCountChange(setNtfyReceiveCount), [])
@@ -154,6 +168,8 @@ function RootLayout() {
         ntfyEnabled={ntfyEnabled}
         ntfyPushCount={ntfyPushCount}
         ntfyReceiveCount={ntfyReceiveCount}
+        ntfyServerUrl={ntfyServerUrl}
+        ntfyTopic={ntfyTopic}
       />
     </div>
   )
