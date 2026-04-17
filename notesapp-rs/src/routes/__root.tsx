@@ -52,12 +52,12 @@ function DebugDrawer({
           <div className="bg-gray-900 text-gray-200 text-xs font-mono rounded-tr-lg p-3 mb-1 min-w-[200px]">
             <div className="text-gray-400 mb-2">debug</div>
             <div className="space-y-1">
-              <div>↑ push <span className="text-green-400">{formatRelativeTime(lastPushAt)}</span></div>
-              <div>↓ pull <span className="text-blue-400">{formatRelativeTime(lastPullAt)}</span></div>
+              <div>sync up <span className="text-green-400">{formatRelativeTime(lastPushAt)}</span></div>
+              <div>sync down <span className="text-blue-400">{formatRelativeTime(lastPullAt)}</span></div>
               <div>pull every {pullSeconds}s</div>
               <div>ntfy {ntfyEnabled ? <span className="text-green-400">on</span> : <span className="text-gray-500">off</span>}</div>
-              <div>↑↑ {ntfyPushCount} sent</div>
-              <div>↓↓ {ntfyReceiveCount} received</div>
+              <div>pub {ntfyPushCount}</div>
+              <div>sub {ntfyReceiveCount}</div>
             </div>
           </div>
         )}
