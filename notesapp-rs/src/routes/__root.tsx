@@ -99,11 +99,14 @@ function RootLayout() {
   useEffect(() => onNtfyReceiveCountChange(setNtfyReceiveCount), [])
 
   useEffect(() => {
+    console.log('[root] ntfy effect running', { connected, ntfyEnabled, ntfyServerUrl, ntfyTopic })
     if (!connected || !ntfyEnabled) {
+      console.log('[root] stopping ntfy listener')
       stopNtfyListener()
       return
     }
 
+    console.log('[root] starting ntfy listener')
     void startNtfyListener()
 
     return () => {
@@ -141,12 +144,16 @@ function RootLayout() {
       stopSyncLoop()
       stopNtfyListener()
     })
-    onRemoteChange(() => pullAndMerge())
+    onRemoteChange(() => {
+      void pullAndMerge()
+      void pullAndApplySyncedSettings()
+    })
 
     const onFocus = () => {
       if (rs.connected) {
         void pullAndMerge()
         void pushDirtyNotes()
+        void pullAndApplySyncedSettings()
       }
     }
     window.addEventListener('focus', onFocus)

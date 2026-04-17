@@ -2,6 +2,7 @@ import RemoteStorage from "remotestoragejs";
 import { createBodyState } from './crdt'
 import type { RemoteNote } from "./notes";
 import { getSetting } from './db'
+import { getRxCollections } from './rxdb'
 
 export const rs = new RemoteStorage({ logging: true });
 
@@ -84,7 +85,6 @@ export async function pullAndApplySyncedSettings(): Promise<SyncedSettings | nul
   const localUpdatedAt = localUpdatedAtStr ? new Date(localUpdatedAtStr).getTime() : 0;
 
   if (remoteUpdatedAt > localUpdatedAt) {
-    const { getRxCollections } = await import('./db');
     const collections = await getRxCollections();
     await Promise.all([
       collections.settings.upsert({ key: 'ntfyEnabled', value: String(remote.ntfy.enabled) }),
