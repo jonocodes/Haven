@@ -174,7 +174,9 @@ export function NoteEditor({ noteId }: Props) {
   async function handleCopyPublicLink() {
     const shareId = note?.share?.shareId
     if (!shareId) return
-    await navigator.clipboard.writeText(getPublicNoteUrl(shareId))
+    const sourceUrl = getPublicNoteUrl(shareId)
+    const appPublicUrl = `${window.location.origin}/public/${encodeURIComponent(shareId)}?src=${encodeURIComponent(sourceUrl)}`
+    await navigator.clipboard.writeText(appPublicUrl)
   }
 
   if (note === undefined) return <p className="p-4 text-gray-400">Loading…</p>
