@@ -1,10 +1,19 @@
 import RemoteStorage from "remotestoragejs";
-import { createBodyState } from './crdt'
+import { createBodyState } from "./crdt";
 import type { RemoteNote } from "./notes";
-import { getSetting } from './db'
-import { getRxCollections } from './rxdb'
+import { getSetting } from "./db";
+import { getRxCollections } from "./rxdb";
 
 export const rs = new RemoteStorage({ logging: true });
+
+const dropboxAppKey = import.meta.env.VITE_DROPBOX_APP_KEY;
+const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+if (dropboxAppKey || googleClientId) {
+  rs.setApiKeys({
+    ...(dropboxAppKey ? { dropbox: dropboxAppKey } : {}),
+    ...(googleClientId ? { googledrive: googleClientId } : {}),
+  });
+}
 
 rs.access.claim("notes-app", "rw");
 rs.caching.enable("/notes-app/");
@@ -40,11 +49,11 @@ export async function pushNote(note: RemoteNote): Promise<void> {
 export async function pullNote(id: string): Promise<RemoteNote | null> {
   const result = await client().getFile(`${NOTES_PATH}${id}.json`);
   if (!result?.data) return null;
-  const parsed = JSON.parse(result.data as string) as RemoteNote
+  const parsed = JSON.parse(result.data as string) as RemoteNote;
   return {
     ...parsed,
     crdtState: parsed.crdtState ?? createBodyState(parsed.body),
-  }
+  };
 }
 
 export async function listRemoteNoteIds(): Promise<string[]> {
@@ -61,13 +70,8 @@ export async function pullAllNotes(): Promise<RemoteNote[]> {
   return notes.filter((n): n is RemoteNote => n !== null);
 }
 
-
 export async function pushSyncedSettings(settings: SyncedSettings): Promise<void> {
-  await client().storeFile(
-    "application/json",
-    SYNCED_SETTINGS_PATH,
-    JSON.stringify(settings),
-  );
+  await client().storeFile("application/json", SYNCED_SETTINGS_PATH, JSON.stringify(settings));
 }
 
 export async function pullSyncedSettings(): Promise<SyncedSettings | null> {
@@ -81,16 +85,16 @@ export async function pullAndApplySyncedSettings(): Promise<SyncedSettings | nul
   if (!remote) return null;
 
   const remoteUpdatedAt = new Date(remote.updatedAt).getTime();
-  const localUpdatedAtStr = await getSetting('syncedSettingsUpdatedAt');
+  const localUpdatedAtStr = await getSetting("syncedSettingsUpdatedAt");
   const localUpdatedAt = localUpdatedAtStr ? new Date(localUpdatedAtStr).getTime() : 0;
 
   if (remoteUpdatedAt > localUpdatedAt) {
     const collections = await getRxCollections();
     await Promise.all([
-      collections.settings.upsert({ key: 'ntfyEnabled', value: String(remote.ntfy.enabled) }),
-      collections.settings.upsert({ key: 'ntfyServerUrl', value: remote.ntfy.serverUrl }),
-      collections.settings.upsert({ key: 'ntfyTopic', value: remote.ntfy.topic }),
-      collections.settings.upsert({ key: 'syncedSettingsUpdatedAt', value: remote.updatedAt }),
+      collections.settings.upsert({ key: "ntfyEnabled", value: String(remote.ntfy.enabled) }),
+      collections.settings.upsert({ key: "ntfyServerUrl", value: remote.ntfy.serverUrl }),
+      collections.settings.upsert({ key: "ntfyTopic", value: remote.ntfy.topic }),
+      collections.settings.upsert({ key: "syncedSettingsUpdatedAt", value: remote.updatedAt }),
     ]);
   }
 
