@@ -16,7 +16,28 @@ function client() {
 
 const NOTES_PATH = "common/notes/";
 const TOMBSTONES_PATH = "common/tombstones/";
+const PUBLIC_NOTES_PATH = 'shared/';
 const SYNCED_SETTINGS_PATH = "common/settings/sync.json";
+
+export interface PublicNote {
+  version: 1
+  title: string
+  body: string
+  updatedAt: string
+}
+
+function publicClient() {
+  return rs.scope('/public/notes-app/')
+}
+
+function toPublicNote(note: RemoteNote): PublicNote {
+  return {
+    version: 1,
+    title: note.title,
+    body: note.body,
+    updatedAt: note.updatedAt,
+  }
+}
 
 export interface SyncedSettings {
   version: 1;
@@ -35,6 +56,45 @@ export async function pushNote(note: RemoteNote): Promise<void> {
     `${NOTES_PATH}${note.id}.json`,
     JSON.stringify(note),
   );
+
+  if (note.share?.published && note.share?.shareId) {
+    await publicClient().storeFile(
+      'application/json',
+      `${PUBLIC_NOTES_PATH}${note.share.shareId}.json`,
+      JSON.stringify(toPublicNote(note)),
+    )
+  }
+}
+
+export async function publishNote(note: RemoteNote): Promise<{ shareId: string; publicUrl: string }> {
+  const shareId = note.share?.shareId || crypto.randomUUID()
+  const publicNote = toPublicNote({
+    ...note,
+    share: {
+      published: true,
+      shareId,
+      publishedAt: note.share?.publishedAt ?? note.updatedAt,
+    },
+  })
+
+  await publicClient().storeFile(
+    'application/json',
+    `${PUBLIC_NOTES_PATH}${shareId}.json`,
+    JSON.stringify(publicNote),
+  )
+
+  return {
+    shareId,
+    publicUrl: publicClient().getItemURL(`${PUBLIC_NOTES_PATH}${shareId}.json`),
+  }
+}
+
+export async function unpublishNoteByShareId(shareId: string): Promise<void> {
+  await publicClient().remove(`${PUBLIC_NOTES_PATH}${shareId}.json`)
+}
+
+export function getPublicNoteUrl(shareId: string): string {
+  return publicClient().getItemURL(`${PUBLIC_NOTES_PATH}${shareId}.json`)
 }
 
 export async function pullNote(id: string): Promise<RemoteNote | null> {

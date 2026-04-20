@@ -1,13 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { updateNoteTitle, applyBodyUpdate, archiveNote, deleteNote } from '../lib/db'
+import { updateNoteTitle, applyBodyUpdate, archiveNote, deleteNote, updateNoteShare } from '../lib/db'
 import { useNote, useSetting, useSyncMeta } from '../lib/dbHooks'
 import { schedulePush, pushDirtyNotes } from '../lib/sync'
+import { getPublicNoteUrl, publishNote, unpublishNoteByShareId } from '../lib/remotestorage'
 import { SyncStatus } from './SyncStatus'
 import { MarkdownEditor } from './MarkdownEditor'
 import { computeInsertedWordHighlights, type TextRange } from '../lib/diffHighlights'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
+import type { RemoteNote } from '../lib/notes'
 
 interface Props {
   noteId: string
@@ -24,6 +26,7 @@ export function NoteEditor({ noteId }: Props) {
   const [incomingHighlights, setIncomingHighlights] = useState<TextRange[]>([])
   const [hasLoaded, setHasLoaded] = useState(false)
   const [bodySyncRevision, setBodySyncRevision] = useState(0)
+  const [publishBusy, setPublishBusy] = useState(false)
   const currentBodyRef = useRef('')
   const lastLocalBodyRef = useRef<string | null>(null)
   const pendingBodySaveRef = useRef<string | null>(null)
@@ -141,6 +144,39 @@ export function NoteEditor({ noteId }: Props) {
     URL.revokeObjectURL(url)
   }
 
+  async function handlePublishToggle() {
+    if (!note || publishBusy) return
+    setPublishBusy(true)
+    try {
+      if (note.share?.published && note.share.shareId) {
+        await unpublishNoteByShareId(note.share.shareId)
+        await updateNoteShare(noteId, {
+          published: false,
+          shareId: null,
+          publishedAt: null,
+        })
+        schedulePush(noteId)
+        return
+      }
+
+      const { shareId } = await publishNote(note as RemoteNote)
+      await updateNoteShare(noteId, {
+        published: true,
+        shareId,
+        publishedAt: note.share?.publishedAt ?? new Date().toISOString(),
+      })
+      schedulePush(noteId)
+    } finally {
+      setPublishBusy(false)
+    }
+  }
+
+  async function handleCopyPublicLink() {
+    const shareId = note?.share?.shareId
+    if (!shareId) return
+    await navigator.clipboard.writeText(getPublicNoteUrl(shareId))
+  }
+
   if (note === undefined) return <p className="p-4 text-gray-400">Loading…</p>
   if (note === null) return <p className="p-4 text-gray-400">Note not found.</p>
 
@@ -185,10 +221,31 @@ export function NoteEditor({ noteId }: Props) {
 
       <div className="flex gap-4 mt-4 pt-4 border-t border-gray-100">
         <Button
+          onClick={handlePublishToggle}
+          variant="ghost"
+          className="text-xs p-0"
+          disabled={publishBusy}
+        >
+          {note.share?.published ? 'Unpublish' : 'Publish'}
+        </Button>
+        <Button
+          onClick={handleCopyPublicLink}
+          variant="ghost"
+          className="text-xs p-0"
+          disabled={!note.share?.published || !note.share?.shareId}
+        >
+          Copy public link
+        </Button>
+        {note.share?.published && (
+          <span className="text-xs text-gray-400 self-center">
+            Public updates follow note edits automatically.
+          </span>
+        )}
+        <Button
           data-testid="archive-btn"
           onClick={handleArchive}
           variant="ghost"
-          className="text-xs p-0"
+          className="text-xs p-0 ml-auto"
         >
           Archive
         </Button>
@@ -203,7 +260,7 @@ export function NoteEditor({ noteId }: Props) {
         <Button
           onClick={handleDownload}
           variant="ghost"
-          className="text-xs p-0 ml-auto"
+          className="text-xs p-0"
         >
           Download .md
         </Button>

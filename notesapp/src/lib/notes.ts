@@ -4,6 +4,13 @@ export interface Note {
   body: string
   archived?: boolean
   updatedAt: string
+  share?: NoteShareState
+}
+
+export interface NoteShareState {
+  published: boolean
+  shareId: string | null
+  publishedAt: string | null
 }
 
 export interface RemoteNote extends Note {

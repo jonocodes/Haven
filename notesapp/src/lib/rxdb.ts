@@ -6,6 +6,9 @@ export interface NoteMetaDoc {
   title: string
   archived?: boolean
   updatedAt: string
+  sharePublished?: boolean
+  shareId?: string
+  sharePublishedAt?: string
 }
 
 export interface NoteContentDoc {
@@ -59,6 +62,17 @@ const noteMetaSchema: RxJsonSchema<NoteMetaDoc> = {
       type: 'boolean',
     },
     updatedAt: {
+      type: 'string',
+      maxLength: 40,
+    },
+    sharePublished: {
+      type: 'boolean',
+    },
+    shareId: {
+      type: 'string',
+      maxLength: 200,
+    },
+    sharePublishedAt: {
       type: 'string',
       maxLength: 40,
     },

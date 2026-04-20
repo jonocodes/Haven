@@ -1,6 +1,6 @@
 import { combineLatest, map, type Observable } from 'rxjs'
 import { createBodyState, getTextFromBodyState, mergeBodyStates, replaceBodyText } from './crdt'
-import type { Note, RemoteNote, SyncMetadata } from './notes'
+import type { Note, NoteShareState, RemoteNote, SyncMetadata } from './notes'
 import {
   getRxCollections,
   type NoteContentDoc,
@@ -16,12 +16,21 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
 }
 
 function hydrateNote(meta: NoteMetaDoc, content: NoteContentDoc): Note {
+  const share: NoteShareState | undefined = meta.sharePublished || meta.shareId || meta.sharePublishedAt
+    ? {
+        published: meta.sharePublished ?? false,
+        shareId: meta.shareId ?? null,
+        publishedAt: meta.sharePublishedAt ?? null,
+      }
+    : undefined
+
   return {
     id: meta.id,
     title: meta.title,
     body: content.plainText,
     archived: meta.archived,
     updatedAt: meta.updatedAt,
+    share,
   }
 }
 
@@ -52,6 +61,9 @@ async function upsertNoteParts(note: RemoteNote): Promise<void> {
     title: note.title,
     archived: note.archived,
     updatedAt: note.updatedAt,
+    sharePublished: note.share?.published,
+    shareId: note.share?.shareId ?? undefined,
+    sharePublishedAt: note.share?.publishedAt ?? undefined,
   }))
 }
 
@@ -125,6 +137,21 @@ export async function updateNote(id: string, changes: Partial<Pick<Note, 'title'
       updatedAt,
     }))
   }
+
+  await upsertSyncMeta(id, { isDirty: true, syncError: undefined })
+}
+
+export async function updateNoteShare(id: string, share: NoteShareState): Promise<void> {
+  const collections = await getRxCollections()
+  const metaDoc = await collections.notesMeta.findOne(id).exec()
+  if (!metaDoc) return
+
+  await metaDoc.incrementalPatch({
+    sharePublished: share.published,
+    shareId: share.shareId ?? undefined,
+    sharePublishedAt: share.publishedAt ?? undefined,
+    updatedAt: nowIso(),
+  })
 
   await upsertSyncMeta(id, { isDirty: true, syncError: undefined })
 }
@@ -282,6 +309,9 @@ export async function applyRemoteNote(note: RemoteNote): Promise<void> {
         title: note.title,
         archived: note.archived,
         updatedAt: note.updatedAt,
+        sharePublished: note.share?.published,
+        shareId: note.share?.shareId ?? undefined,
+        sharePublishedAt: note.share?.publishedAt ?? undefined,
       }
     : localMeta
 
