@@ -150,6 +150,30 @@ describe('db facade', () => {
     expect((await getSyncMeta(note.id))?.isDirty).toBe(true)
   })
 
+  it('applyRemoteNote persists incoming share metadata', async () => {
+    const note = await createNote('Shared', 'Body')
+
+    await applyRemoteNote({
+      id: note.id,
+      title: 'Shared',
+      body: 'Body',
+      updatedAt: new Date(Date.now() + 1_000).toISOString(),
+      share: {
+        published: true,
+        shareId: 'sh_public123',
+        publishedAt: '2026-04-20T00:00:00.000Z',
+      },
+    })
+
+    expect(await getNote(note.id)).toMatchObject({
+      share: {
+        published: true,
+        shareId: 'sh_public123',
+        publishedAt: '2026-04-20T00:00:00.000Z',
+      },
+    })
+  })
+
   it('deleteNote removes split docs and records a pending tombstone', async () => {
     const note = await createNote('To delete', 'Body')
     await deleteNote(note.id)

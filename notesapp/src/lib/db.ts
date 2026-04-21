@@ -315,12 +315,21 @@ export async function applyRemoteNote(note: RemoteNote): Promise<void> {
       }
     : localMeta
 
+  const mergedShare = mergedMeta.sharePublished || mergedMeta.shareId || mergedMeta.sharePublishedAt
+    ? {
+        published: mergedMeta.sharePublished ?? false,
+        shareId: mergedMeta.shareId ?? null,
+        publishedAt: mergedMeta.sharePublishedAt ?? null,
+      }
+    : undefined
+
   await upsertNoteParts({
     id: note.id,
     title: mergedMeta.title,
     body: mergedBody,
     archived: mergedMeta.archived,
     updatedAt: mergedMeta.updatedAt,
+    share: mergedShare,
     crdtState: mergedState,
   })
   const shouldStayDirty = Boolean(
