@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 // vi.hoisted ensures these exist when vi.mock factory runs (which is hoisted before imports)
-const { mockStoreFile, mockGetFile, mockGetListing, mockRemove, mockOn, mockScopeOn, mockClient } =
+const { mockStoreFile, mockGetFile, mockGetListing, mockRemove, mockOn, mockScopeOn, mockGetItemURL, mockClient } =
   vi.hoisted(() => {
     const mockStoreFile = vi.fn().mockResolvedValue(undefined)
     const mockGetFile = vi.fn()
@@ -9,14 +9,16 @@ const { mockStoreFile, mockGetFile, mockGetListing, mockRemove, mockOn, mockScop
     const mockRemove = vi.fn().mockResolvedValue(undefined)
     const mockOn = vi.fn()
     const mockScopeOn = vi.fn()
+    const mockGetItemURL = vi.fn((path: string) => `https://public.example/${path}`)
     const mockClient = {
       storeFile: mockStoreFile,
       getFile: mockGetFile,
       getListing: mockGetListing,
       remove: mockRemove,
       on: mockScopeOn,
+      getItemURL: mockGetItemURL,
     }
-    return { mockStoreFile, mockGetFile, mockGetListing, mockRemove, mockOn, mockScopeOn, mockClient }
+    return { mockStoreFile, mockGetFile, mockGetListing, mockRemove, mockOn, mockScopeOn, mockGetItemURL, mockClient }
   })
 
 vi.mock('remotestoragejs', () => {
@@ -46,6 +48,9 @@ import {
   onDisconnected,
   onRemoteChange,
   rs,
+  publishNote,
+  unpublishNoteByShareId,
+  getPublicNoteUrl,
 } from '../lib/remotestorage'
 import type { Note } from '../lib/notes'
 
@@ -83,6 +88,48 @@ describe('pushNote', () => {
   it('rejects when storeFile rejects', async () => {
     mockStoreFile.mockRejectedValueOnce(new Error('write fail'))
     await expect(pushNote(sampleNote)).rejects.toThrow('write fail')
+  })
+
+  it('writes public note copy when share is published', async () => {
+    await pushNote({
+      ...sampleNote,
+      share: {
+        published: true,
+        shareId: 'sh_abc123',
+        publishedAt: sampleNote.updatedAt,
+      },
+    })
+
+    expect(mockStoreFile).toHaveBeenCalledWith(
+      'application/json',
+      'shared/sh_abc123.json',
+      expect.stringContaining('"version":1'),
+    )
+  })
+})
+
+describe('public sharing helpers', () => {
+  it('publishNote returns a shareId and URL', async () => {
+    const result = await publishNote(sampleNote)
+
+    expect(result.shareId).toBeTruthy()
+    expect(result.publicUrl).toContain('/shared/')
+    expect(mockStoreFile).toHaveBeenCalledWith(
+      'application/json',
+      expect.stringMatching(/^shared\/.+\.json$/),
+      expect.any(String),
+    )
+  })
+
+  it('unpublishNoteByShareId removes public object', async () => {
+    await unpublishNoteByShareId('sh_deadbeef')
+    expect(mockRemove).toHaveBeenCalledWith('shared/sh_deadbeef.json')
+  })
+
+  it('getPublicNoteUrl calls getItemURL for the public note path', () => {
+    const url = getPublicNoteUrl('sh_link')
+    expect(mockGetItemURL).toHaveBeenCalledWith('shared/sh_link.json')
+    expect(url).toBe('https://public.example/shared/sh_link.json')
   })
 })
 

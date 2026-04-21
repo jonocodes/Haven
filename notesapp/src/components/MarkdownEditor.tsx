@@ -14,9 +14,10 @@ import {
 
 interface Props {
   value: string
-  onChange: (value: string) => void
+  onChange?: (value: string) => void
   incomingHighlightRanges?: Array<{ from: number; to: number }>
   syncRevision?: number
+  readOnly?: boolean
 }
 
 const setIncomingHighlightsEffect = StateEffect.define<Array<{ from: number; to: number }>>()
@@ -69,7 +70,7 @@ const baseTheme = EditorView.theme({
   },
 })
 
-export function MarkdownEditor({ value, onChange, incomingHighlightRanges = [], syncRevision }: Props) {
+export function MarkdownEditor({ value, onChange, incomingHighlightRanges = [], syncRevision, readOnly = false }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
@@ -82,6 +83,8 @@ export function MarkdownEditor({ value, onChange, incomingHighlightRanges = [], 
   // Mount editor once
   useEffect(() => {
     if (!containerRef.current) return
+
+    const readOnlyExtension = (EditorState as { readOnly?: { of: (value: boolean) => unknown } }).readOnly?.of(readOnly)
 
     const state = EditorState.create({
       doc: value,
@@ -96,6 +99,7 @@ export function MarkdownEditor({ value, onChange, incomingHighlightRanges = [], 
         editorTheme,
         baseTheme,
         incomingHighlightsField,
+        ...(readOnlyExtension ? [readOnlyExtension] : []),
         EditorView.lineWrapping,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
@@ -103,7 +107,7 @@ export function MarkdownEditor({ value, onChange, incomingHighlightRanges = [], 
               suppressNextChangeRef.current = false
               return
             }
-            onChangeRef.current(update.state.doc.toString())
+            onChangeRef.current?.(update.state.doc.toString())
           }
         }),
       ],
@@ -116,7 +120,7 @@ export function MarkdownEditor({ value, onChange, incomingHighlightRanges = [], 
       view.destroy()
       viewRef.current = null
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [readOnly]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync remote value changes into editor without disrupting local edits
   useEffect(() => {

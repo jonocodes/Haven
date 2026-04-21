@@ -38,10 +38,15 @@ vi.mock('../lib/remotestorage', () => ({
   onConnected: (cb: () => void) => onConnectedMock(cb),
   onDisconnected: (cb: () => void) => onDisconnectedMock(cb),
   onRemoteChange: (cb: () => void) => onRemoteChangeMock(cb),
+  pullAndApplySyncedSettings: vi.fn().mockResolvedValue(null),
 }))
 
 vi.mock('../lib/notify', () => ({
   onNtfyPublishCountChange: (cb: (count: number) => void) => {
+    cb(0)
+    return () => {}
+  },
+  onNtfyReceiveCountChange: (cb: (count: number) => void) => {
     cb(0)
     return () => {}
   },
