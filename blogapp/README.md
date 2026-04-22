@@ -24,7 +24,7 @@ The app now includes a simple writer interface with:
 - explicit actions: Save draft, Publish, Unpublish, Delete, Rebuild index
 - open links for public index and selected post markdown
 
-This is intentionally minimal and can be restyled/refined later.
+This is intentionally minimal and now uses shadcn-style UI primitives (Button/Input/Textarea/Card) for widgets.
 
 ## Goals
 

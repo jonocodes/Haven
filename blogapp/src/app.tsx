@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ConnectWidget } from './components/ConnectWidget'
+import { Button } from './components/ui/button'
+import { Card, CardContent, CardHeader } from './components/ui/card'
+import { Input } from './components/ui/input'
+import { Textarea } from './components/ui/textarea'
 import { deletePost, generatePostId, publishPost, rebuildIndex, unpublishPost } from './lib/blogService'
 import {
   getPublicIndexUrl,
@@ -163,78 +167,83 @@ export function App() {
   }
 
   return (
-    <main style={{ fontFamily: 'system-ui, sans-serif', margin: '2rem auto', maxWidth: 1100, lineHeight: 1.4 }}>
+    <main className="mx-auto max-w-6xl p-6 font-sans text-slate-900">
       <ConnectWidget />
-      <h1>Blog App (remoteStorage)</h1>
-      <p style={{ marginBottom: 16 }}>
-        Connection status: <strong>{connected ? 'Connected' : 'Not connected'}</strong>. Use the remoteStorage widget in the
-        page corner to connect.
-      </p>
 
-      <section style={{ marginBottom: 16, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-        <a href={publicIndexUrl} target="_blank" rel="noreferrer">Open public index.json</a>
-        {publicPostUrl ? <a href={publicPostUrl} target="_blank" rel="noreferrer">Open current post markdown</a> : null}
-      </section>
+      <header className="mb-6 space-y-2">
+        <h1 className="text-3xl font-semibold">Blog App (remoteStorage)</h1>
+        <p>
+          Connection status: <strong>{connected ? 'Connected' : 'Not connected'}</strong>. Use the remoteStorage widget in the
+          page corner to connect.
+        </p>
+        <div className="flex flex-wrap gap-4 text-sm">
+          <a className="underline underline-offset-4" href={publicIndexUrl} target="_blank" rel="noreferrer">Open public index.json</a>
+          {publicPostUrl ? (
+            <a className="underline underline-offset-4" href={publicPostUrl} target="_blank" rel="noreferrer">
+              Open current post markdown
+            </a>
+          ) : null}
+        </div>
+      </header>
 
-      <section style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16 }}>
-        <aside style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-[320px_1fr]">
+        <Card>
+          <CardHeader>
             <strong>Posts</strong>
-            <button type="button" onClick={clearEditor}>New</button>
-          </div>
+            <Button variant="outline" size="sm" onClick={clearEditor}>New</Button>
+          </CardHeader>
+          <CardContent>
+            {items.length === 0 ? <p className="text-sm text-slate-500">No posts yet.</p> : null}
+            <ul className="space-y-2">
+              {items.map((item) => (
+                <li key={item.id}>
+                  <Button variant="secondary" className="h-auto w-full justify-start p-3 text-left" onClick={() => setSelectedId(item.id)}>
+                    <div>
+                      <div className="font-semibold">{item.title}</div>
+                      <div className="text-xs text-slate-500">{item.status} · {item.id}</div>
+                    </div>
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
 
-          {items.length === 0 ? <p>No posts yet.</p> : null}
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-            {items.map((item) => (
-              <li key={item.id} style={{ marginBottom: 8 }}>
-                <button
-                  type="button"
-                  onClick={() => setSelectedId(item.id)}
-                  style={{ width: '100%', textAlign: 'left', padding: 8 }}
-                >
-                  <div style={{ fontWeight: 600 }}>{item.title}</div>
-                  <div style={{ fontSize: 12, opacity: 0.8 }}>{item.status} · {item.id}</div>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </aside>
-
-        <section style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12 }}>
-          <div style={{ display: 'grid', gap: 8 }}>
-            <label>
-              <div>Title</div>
-              <input value={title} onChange={(event) => setTitle(event.target.value)} style={{ width: '100%', padding: 8 }} />
+        <Card>
+          <CardContent className="space-y-4 pt-4">
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">Title</span>
+              <Input value={title} onChange={(event) => setTitle(event.target.value)} />
             </label>
 
-            <label>
-              <div>Excerpt</div>
-              <input value={excerpt} onChange={(event) => setExcerpt(event.target.value)} style={{ width: '100%', padding: 8 }} />
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">Excerpt</span>
+              <Input value={excerpt} onChange={(event) => setExcerpt(event.target.value)} />
             </label>
 
-            <label>
-              <div>Markdown Body</div>
-              <textarea
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">Markdown Body</span>
+              <Textarea
                 value={body}
                 onChange={(event) => setBody(event.target.value)}
                 rows={18}
-                style={{ width: '100%', padding: 8, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}
+                className="font-mono"
               />
             </label>
-          </div>
 
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
-            <button type="button" disabled={busy} onClick={() => void saveDraft()}>Save draft</button>
-            <button type="button" disabled={busy} onClick={() => void runAction('publish')}>Publish</button>
-            <button type="button" disabled={busy} onClick={() => void runAction('unpublish')}>Unpublish</button>
-            <button type="button" disabled={busy} onClick={() => void runAction('delete')}>Delete</button>
-            <button type="button" disabled={busy} onClick={() => void runAction('rebuild')}>Rebuild index</button>
-            <span style={{ marginLeft: 'auto', fontSize: 12, opacity: 0.8 }}>Status: {status}</span>
-          </div>
+            <div className="flex flex-wrap gap-2">
+              <Button disabled={busy} onClick={() => void saveDraft()}>Save draft</Button>
+              <Button disabled={busy} variant="secondary" onClick={() => void runAction('publish')}>Publish</Button>
+              <Button disabled={busy} variant="secondary" onClick={() => void runAction('unpublish')}>Unpublish</Button>
+              <Button disabled={busy} variant="destructive" onClick={() => void runAction('delete')}>Delete</Button>
+              <Button disabled={busy} variant="outline" onClick={() => void runAction('rebuild')}>Rebuild index</Button>
+              <span className="ml-auto text-xs text-slate-500">Status: {status}</span>
+            </div>
 
-          {message ? <p style={{ color: 'green' }}>{message}</p> : null}
-          {error ? <p style={{ color: 'crimson' }}>{error}</p> : null}
-        </section>
+            {message ? <p className="text-sm text-green-700">{message}</p> : null}
+            {error ? <p className="text-sm text-red-700">{error}</p> : null}
+          </CardContent>
+        </Card>
       </section>
     </main>
   )
