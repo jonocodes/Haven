@@ -2,6 +2,18 @@
 
 A minimal blog engine where posts and metadata live in remoteStorage under `/public/`.
 
+## Quick start
+
+```bash
+npm install
+npm run dev
+```
+
+Then open the local URL shown by Vite (usually `http://localhost:5173`).
+
+This package now includes a minimal React + Vite runtime scaffold (similar baseline stack to `notesapp`) plus the blog core library modules.
+
+
 ## Goals
 
 - Keep authoring simple: markdown files can be edited directly from a mounted remoteStorage public directory.
