@@ -16,6 +16,7 @@ import {
   storePostMarkdown,
   storePostMeta,
 } from './lib/remotestorage'
+import { parseMarkdownToPost } from './lib/markdown'
 import type { BlogPostMeta } from './lib/types'
 
 function sortByUpdatedDescending(items: BlogPostMeta[]): BlogPostMeta[] {
@@ -95,7 +96,12 @@ export function App() {
 
     try {
       const now = new Date().toISOString()
-      const postId = id ?? (await generatePostId(title || 'untitled'))
+      const parsed = parseMarkdownToPost(body)
+      const resolvedTitle = title.trim() || parsed.title || 'Untitled'
+      const resolvedExcerpt = excerpt.trim() || parsed.excerpt
+      const parsedBody = parsed.body
+
+      const postId = id ?? (await generatePostId(resolvedTitle || 'untitled'))
       const createdAt = selectedMeta?.createdAt ?? now
       const nextStatus = selectedMeta?.status ?? 'draft'
       const nextPublishedAt = selectedMeta?.publishedAt ?? null
@@ -104,8 +110,8 @@ export function App() {
       const meta: BlogPostMeta = {
         version: 1,
         id: postId,
-        title: title || 'Untitled',
-        excerpt,
+        title: resolvedTitle,
+        excerpt: resolvedExcerpt,
         status: nextStatus,
         createdAt,
         updatedAt: now,
@@ -114,9 +120,12 @@ export function App() {
       }
 
       await storePostMeta(meta)
-      await storePostMarkdown(postId, body)
+      await storePostMarkdown(postId, parsedBody)
 
       setId(postId)
+      setTitle(meta.title)
+      setExcerpt(meta.excerpt)
+      setBody(parsedBody)
       setStatus(meta.status)
       await refreshList()
       setMessage('Draft saved')

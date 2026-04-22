@@ -21,6 +21,7 @@ The app now includes a simple writer interface with:
 - remoteStorage.js widget-based connect/disconnect
 - post list panel (metadata-backed)
 - markdown editor + title/excerpt fields
+- auto title/excerpt parsing from markdown (notesapp-style first H1 parsing)
 - explicit actions: Save draft, Publish, Unpublish, Delete, Rebuild index
 - open links for public index and selected post markdown
 
