@@ -15,6 +15,7 @@ import {
 interface Props {
   value: string
   onChange?: (value: string) => void
+  onImageUpload?: (file: File) => Promise<string>
   incomingHighlightRanges?: Array<{ from: number; to: number }>
   syncRevision?: number
   readOnly?: boolean
@@ -70,7 +71,22 @@ const baseTheme = EditorView.theme({
   },
 })
 
-export function MarkdownEditor({ value, onChange, incomingHighlightRanges = [], syncRevision, readOnly = false }: Props) {
+function insertAtCursor(view: EditorView, text: string) {
+  const { from, to } = view.state.selection.main
+  view.dispatch({
+    changes: { from, to, insert: text },
+    selection: { anchor: from + text.length },
+  })
+}
+
+export function MarkdownEditor({
+  value,
+  onChange,
+  onImageUpload,
+  incomingHighlightRanges = [],
+  syncRevision,
+  readOnly = false,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
@@ -173,5 +189,36 @@ export function MarkdownEditor({ value, onChange, incomingHighlightRanges = [], 
     }
   }, [])
 
-  return <div ref={containerRef} className="w-full" />
+  return (
+    <div
+      ref={containerRef}
+      className="w-full"
+      onPaste={(e) => {
+        if (!onImageUpload || readOnly) return
+        const view = viewRef.current
+        if (!view) return
+        const imageFiles = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith('image/'))
+        if (imageFiles.length === 0) return
+        e.preventDefault()
+        for (const file of imageFiles) {
+          void onImageUpload(file).then((path) => {
+            insertAtCursor(view, `![image](${path})`)
+          })
+        }
+      }}
+      onDrop={(e) => {
+        if (!onImageUpload || readOnly) return
+        const view = viewRef.current
+        if (!view) return
+        const imageFiles = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.type.startsWith('image/'))
+        if (imageFiles.length === 0) return
+        e.preventDefault()
+        for (const file of imageFiles) {
+          void onImageUpload(file).then((path) => {
+            insertAtCursor(view, `![image](${path})`)
+          })
+        }
+      }}
+    />
+  )
 }

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useEffect } from 'react'
 import { MarkdownEditor } from './MarkdownEditor'
 import type { PublicNote } from '../lib/remotestorage'
+import { getNoteByShareId } from '../lib/db'
 
 interface Props {
   shareId: string
@@ -26,21 +27,23 @@ export function PublicNoteView({ shareId }: Props) {
       setLoading(true)
       setError(null)
 
-      if (!srcUrl) {
-        setError('Missing source URL for shared note.')
-        setLoading(false)
-        return
-      }
-
       try {
-        const response = await fetch(srcUrl)
-        if (!response.ok) {
-          throw new Error(`Unable to load shared note (${response.status}).`)
-        }
-        const parsed = (await response.json()) as PublicNote
-
-        if (!cancelled) {
-          setNote(parsed)
+        if (srcUrl) {
+          const response = await fetch(srcUrl)
+          if (!response.ok) {
+            throw new Error(`Unable to load shared note (${response.status}).`)
+          }
+          const parsed = (await response.json()) as PublicNote
+          if (!cancelled) setNote(parsed)
+        } else {
+          const localNote = await getNoteByShareId(shareId)
+          if (!cancelled) {
+            if (localNote) {
+              setNote({ version: 1, title: localNote.title, body: localNote.body, updatedAt: localNote.updatedAt })
+            } else {
+              setError('Shared note not found.')
+            }
+          }
         }
       } catch (err) {
         if (!cancelled) {
@@ -58,7 +61,7 @@ export function PublicNoteView({ shareId }: Props) {
     return () => {
       cancelled = true
     }
-  }, [srcUrl])
+  }, [srcUrl, shareId])
 
   if (loading) {
     return <p className="max-w-3xl mx-auto p-6 text-gray-500">Loading shared note…</p>
