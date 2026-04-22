@@ -29,6 +29,26 @@ const META_PATH = 'meta/'
 const INDEX_PATH = 'index.json'
 const SETTINGS_PATH = 'settings/blog.json'
 
+export function connectRemoteStorage(userAddress: string): void {
+  rs.connect(userAddress)
+}
+
+export function disconnectRemoteStorage(): void {
+  rs.disconnect()
+}
+
+export function isConnected(): boolean {
+  return rs.connected
+}
+
+export function onConnected(cb: () => void): void {
+  rs.on('connected', cb)
+}
+
+export function onDisconnected(cb: () => void): void {
+  rs.on('disconnected', cb)
+}
+
 export async function storePostMarkdown(id: string, markdown: string): Promise<void> {
   await publicClient().storeFile('text/markdown', `${POSTS_PATH}${id}.md`, markdown)
 }

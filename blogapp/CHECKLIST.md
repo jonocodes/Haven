@@ -18,10 +18,10 @@
 - [ ] Add conflict/retry handling for multi-device updates.
 
 ## App surface (next)
-- [ ] Build post list view from `index.json`.
-- [ ] Build editor for markdown + metadata JSON fields.
-- [ ] Add separate Publish / Unpublish / Delete buttons.
-- [ ] Add Rebuild Index button.
+- [x] Build post list/editor UI for local post metadata browsing.
+- [x] Build editor for markdown + metadata fields.
+- [x] Add separate Publish / Unpublish / Delete buttons.
+- [x] Add Rebuild Index button.
 
 ## Quality
 - [x] Add unit tests for publish/unpublish/delete/rebuild behavior.

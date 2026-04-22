@@ -14,6 +14,17 @@ Then open the local URL shown by Vite (usually `http://localhost:5173`).
 This package now includes a minimal React + Vite runtime scaffold (similar baseline stack to `notesapp`) plus the blog core library modules.
 
 
+## Current writer UI capabilities
+
+The app now includes a simple writer interface with:
+
+- remoteStorage connect/disconnect controls
+- post list panel (metadata-backed)
+- markdown editor + title/excerpt fields
+- explicit actions: Save draft, Publish, Unpublish, Delete, Rebuild index
+
+This is intentionally minimal and can be restyled/refined later.
+
 ## Goals
 
 - Keep authoring simple: markdown files can be edited directly from a mounted remoteStorage public directory.
