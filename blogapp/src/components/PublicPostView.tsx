@@ -23,14 +23,22 @@ export function PublicPostView({ postId }: Props) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const baseUrl = useMemo(() => withTrailingSlash(getQueryParam('base') ?? getPublicBaseUrl()), [])
-  const srcUrl = useMemo(() => `${baseUrl}posts/${postId}.md`, [baseUrl, postId])
-  const metaUrl = useMemo(() => `${baseUrl}meta/${postId}.json`, [baseUrl, postId])
+  const baseUrl = useMemo(() => {
+    const resolved = getQueryParam('base') ?? getPublicBaseUrl()
+    return resolved ? withTrailingSlash(resolved) : null
+  }, [])
+  const srcUrl = useMemo(() => (baseUrl ? `${baseUrl}posts/${postId}.md` : null), [baseUrl, postId])
+  const metaUrl = useMemo(() => (baseUrl ? `${baseUrl}meta/${postId}.json` : null), [baseUrl, postId])
 
   useEffect(() => {
     let cancelled = false
 
     async function load() {
+      if (!srcUrl || !metaUrl) {
+        setError('No public base URL available yet. Connect to remoteStorage first or provide ?base=.')
+        setLoading(false)
+        return
+      }
       setLoading(true)
       setError(null)
 
@@ -84,7 +92,7 @@ export function PublicPostView({ postId }: Props) {
         <div className="mb-2">
           <a
             className="text-sm text-slate-700 underline underline-offset-4"
-            href={`/public?base=${encodeURIComponent(baseUrl)}`}
+            href={baseUrl ? `/public?base=${encodeURIComponent(baseUrl)}` : '/public'}
           >
             ← Back to home
           </a>

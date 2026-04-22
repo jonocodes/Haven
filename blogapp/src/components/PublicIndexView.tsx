@@ -16,13 +16,21 @@ export function PublicIndexView() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const baseUrl = useMemo(() => withTrailingSlash(getBaseUrlFromQuery() ?? getPublicBaseUrl()), [])
-  const indexUrl = useMemo(() => `${baseUrl}index.json`, [baseUrl])
+  const baseUrl = useMemo(() => {
+    const resolved = getBaseUrlFromQuery() ?? getPublicBaseUrl()
+    return resolved ? withTrailingSlash(resolved) : null
+  }, [])
+  const indexUrl = useMemo(() => (baseUrl ? `${baseUrl}index.json` : null), [baseUrl])
 
   useEffect(() => {
     let cancelled = false
 
     async function load() {
+      if (!indexUrl) {
+        setError('No public base URL available yet. Connect to remoteStorage first or provide ?base=.')
+        setLoading(false)
+        return
+      }
       setLoading(true)
       setError(null)
 
@@ -76,7 +84,7 @@ export function PublicIndexView() {
         {index.posts.map((post) => {
           const postUrl = new URL(window.location.origin)
           postUrl.pathname = `/p/${post.id}`
-          postUrl.searchParams.set('base', baseUrl)
+          if (baseUrl) postUrl.searchParams.set('base', baseUrl)
 
           return (
             <li key={post.id} className="rounded-lg border border-slate-200 bg-white p-4">

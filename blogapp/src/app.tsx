@@ -93,16 +93,18 @@ export function App() {
   const publicBaseUrl = getPublicBaseUrl()
   const publicPostUrl = id ? getPublicPostUrl(id) : null
 
-  const publicHomePageUrl = (() => {
-    const url = new URL(window.location.href)
-    url.pathname = '/public'
-    url.search = ''
-    url.hash = ''
-    url.searchParams.set('base', publicBaseUrl)
-    return url.toString()
-  })()
+  const publicHomePageUrl = publicBaseUrl
+    ? (() => {
+        const url = new URL(window.location.href)
+        url.pathname = '/public'
+        url.search = ''
+        url.hash = ''
+        url.searchParams.set('base', publicBaseUrl)
+        return url.toString()
+      })()
+    : null
 
-  const publicPostPageUrl = id
+  const publicPostPageUrl = id && publicBaseUrl
     ? (() => {
         const url = new URL(window.location.href)
         url.pathname = `/p/${id}`
@@ -223,8 +225,12 @@ export function App() {
           page corner to connect.
         </p>
         <div className="flex flex-wrap gap-4 text-sm">
-          <a className="underline underline-offset-4" href={publicHomePageUrl} target="_blank" rel="noreferrer">Open public home page</a>
-          <a className="underline underline-offset-4" href={publicIndexUrl} target="_blank" rel="noreferrer">Open public index.json</a>
+          {publicHomePageUrl ? (
+            <a className="underline underline-offset-4" href={publicHomePageUrl} target="_blank" rel="noreferrer">Open public home page</a>
+          ) : null}
+          {publicIndexUrl ? (
+            <a className="underline underline-offset-4" href={publicIndexUrl} target="_blank" rel="noreferrer">Open public index.json</a>
+          ) : null}
           {publicPostPageUrl ? (
             <a className="underline underline-offset-4" href={publicPostPageUrl} target="_blank" rel="noreferrer">
               Open public post page

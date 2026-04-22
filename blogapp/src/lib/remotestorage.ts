@@ -27,6 +27,11 @@ function publicClient() {
   return rs.scope(`/public/${PUBLIC_DIR}/`)
 }
 
+function itemUrl(path: string): string | null {
+  const url = publicClient().getItemURL(path)
+  return typeof url === 'string' ? url : null
+}
+
 const POSTS_PATH = 'posts/'
 const META_PATH = 'meta/'
 const INDEX_PATH = 'index.json'
@@ -52,21 +57,22 @@ export function onDisconnected(cb: () => void): void {
   rs.on('disconnected', cb)
 }
 
-export function getPublicPostUrl(id: string): string {
-  return publicClient().getItemURL(`${POSTS_PATH}${id}.md`)
+export function getPublicPostUrl(id: string): string | null {
+  return itemUrl(`${POSTS_PATH}${id}.md`)
 }
 
-export function getPublicIndexUrl(): string {
-  return publicClient().getItemURL(INDEX_PATH)
+export function getPublicIndexUrl(): string | null {
+  return itemUrl(INDEX_PATH)
 }
 
-export function getPublicBaseUrl(): string {
+export function getPublicBaseUrl(): string | null {
   const indexUrl = getPublicIndexUrl()
+  if (!indexUrl) return null
   return indexUrl.endsWith(INDEX_PATH) ? indexUrl.slice(0, -INDEX_PATH.length) : indexUrl
 }
 
-export function getPublicMetaUrl(id: string): string {
-  return publicClient().getItemURL(`${META_PATH}${id}.json`)
+export function getPublicMetaUrl(id: string): string | null {
+  return itemUrl(`${META_PATH}${id}.json`)
 }
 
 export function getPublicScopePath(): string {
