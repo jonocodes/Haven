@@ -12,16 +12,19 @@ if (dropboxAppKey || googleClientId) {
   })
 }
 
-rs.access.claim('blog-app', 'rw')
-rs.caching.enable('/blog-app/')
+const RS_MODULE = import.meta.env.VITE_RS_MODULE ?? 'blog-app'
+const PUBLIC_DIR = import.meta.env.VITE_PUBLIC_BLOG_DIR ?? RS_MODULE
+
+rs.access.claim(RS_MODULE, 'rw')
+rs.caching.enable(`/${RS_MODULE}/`)
 rs.setSyncInterval(2000)
 
 function privateClient() {
-  return rs.scope('/blog-app/')
+  return rs.scope(`/${RS_MODULE}/`)
 }
 
 function publicClient() {
-  return rs.scope('/public/blog/')
+  return rs.scope(`/public/${PUBLIC_DIR}/`)
 }
 
 const POSTS_PATH = 'posts/'
@@ -49,13 +52,16 @@ export function onDisconnected(cb: () => void): void {
   rs.on('disconnected', cb)
 }
 
-
 export function getPublicPostUrl(id: string): string {
   return publicClient().getItemURL(`${POSTS_PATH}${id}.md`)
 }
 
 export function getPublicIndexUrl(): string {
   return publicClient().getItemURL(INDEX_PATH)
+}
+
+export function getPublicScopePath(): string {
+  return `/public/${PUBLIC_DIR}/`
 }
 
 export async function storePostMarkdown(id: string, markdown: string): Promise<void> {

@@ -3,7 +3,7 @@ import { ConnectWidget } from './components/ConnectWidget'
 import { Button } from './components/ui/button'
 import { Card, CardContent, CardHeader } from './components/ui/card'
 import { Input } from './components/ui/input'
-import { Textarea } from './components/ui/textarea'
+import { MarkdownEditor } from './components/MarkdownEditor'
 import { deletePost, generatePostId, publishPost, rebuildIndex, unpublishPost } from './lib/blogService'
 import {
   getPublicIndexUrl,
@@ -232,12 +232,7 @@ export function App() {
 
             <label className="grid gap-1 text-sm">
               <span className="font-medium">Markdown Body</span>
-              <Textarea
-                value={body}
-                onChange={(event) => setBody(event.target.value)}
-                rows={18}
-                className="font-mono"
-              />
+              <MarkdownEditor value={body} onChange={setBody} />
             </label>
 
             <div className="flex flex-wrap gap-2">

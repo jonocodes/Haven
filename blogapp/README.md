@@ -234,3 +234,27 @@ export async function unpublishPost(id: string): Promise<void>
 export async function deletePost(id: string): Promise<void>
 export async function rebuildIndex(): Promise<void>
 ```
+
+## 401 troubleshooting (remoteStorage)
+
+If you get `401` while reading/writing the blog directory:
+
+- Ensure your app module claim and directory match. This app now defaults to:
+  - module claim: `blog-app`
+  - public scope: `/public/blog-app/`
+- If your data already lives under another public dir (for example from an earlier app), set:
+  - `VITE_PUBLIC_BLOG_DIR=<your-existing-dir>`
+- If your module name should differ, set:
+  - `VITE_RS_MODULE=<your-module-name>`
+- Reconnect via remoteStorage widget after changing env vars.
+
+In most cases this is an authorization/scope mismatch (or a stale token), not CORS.
+
+## Suggested next imports from notesapp
+
+Beyond markdown parsing, the highest-value features to port are:
+
+- CodeMirror editor plugins (already added): live markdown styling/link behavior and code block language highlighting.
+- Image paste/drop upload hooks in the editor.
+- Read-only public post viewer route that can load from a `?src=` URL.
+- Lightweight sync status indicator in the author UI.
