@@ -60,6 +60,10 @@ export function getPublicIndexUrl(): string {
   return publicClient().getItemURL(INDEX_PATH)
 }
 
+export function getPublicMetaUrl(id: string): string {
+  return publicClient().getItemURL(`${META_PATH}${id}.json`)
+}
+
 export function getPublicScopePath(): string {
   return `/public/${PUBLIC_DIR}/`
 }

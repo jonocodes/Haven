@@ -23,7 +23,7 @@ The app now includes a simple writer interface with:
 - markdown editor + title/excerpt fields
 - auto title/excerpt parsing from markdown (notesapp-style first H1 parsing)
 - explicit actions: Save draft, Publish, Unpublish, Delete, Rebuild index
-- open links for public index and selected post markdown
+- open links for public index, public render route (`/p/:id`), and raw markdown
 
 This is intentionally minimal and now uses shadcn-style UI primitives (Button/Input/Textarea/Card) for widgets.
 
@@ -258,3 +258,12 @@ Beyond markdown parsing, the highest-value features to port are:
 - Image paste/drop upload hooks in the editor.
 - Read-only public post viewer route that can load from a `?src=` URL.
 - Lightweight sync status indicator in the author UI.
+
+
+## Public post rendering
+
+Published posts can be opened through a render route:
+
+- `/p/:id?src=<markdown-url>&meta=<meta-url>`
+
+This shows a read-only rendered page in-app (title + markdown body), similar to notesapp's public view pattern.

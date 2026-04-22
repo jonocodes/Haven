@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ConnectWidget } from './components/ConnectWidget'
+import { PublicPostView } from './components/PublicPostView'
 import { Button } from './components/ui/button'
 import { Card, CardContent, CardHeader } from './components/ui/card'
 import { Input } from './components/ui/input'
@@ -7,6 +8,7 @@ import { MarkdownEditor } from './components/MarkdownEditor'
 import { deletePost, generatePostId, publishPost, rebuildIndex, unpublishPost } from './lib/blogService'
 import {
   getPublicIndexUrl,
+  getPublicMetaUrl,
   getPublicPostUrl,
   isConnected,
   onConnected,
@@ -88,6 +90,26 @@ export function App() {
   const selectedMeta = useMemo(() => items.find((item) => item.id === id) ?? null, [items, id])
   const publicIndexUrl = getPublicIndexUrl()
   const publicPostUrl = id ? getPublicPostUrl(id) : null
+
+  const publicPostPageUrl = id
+    ? (() => {
+        const url = new URL(window.location.href)
+        url.pathname = `/p/${id}`
+        url.search = ''
+        url.searchParams.set('src', getPublicPostUrl(id))
+        url.searchParams.set('meta', getPublicMetaUrl(id))
+        return url.toString()
+      })()
+    : null
+
+  if (window.location.pathname.startsWith('/p/')) {
+    const postIdFromPath = window.location.pathname.split('/').filter(Boolean)[1]
+    if (!postIdFromPath) {
+      return <p className="mx-auto max-w-3xl p-6 text-red-600">Missing post id in URL.</p>
+    }
+    return <PublicPostView postId={postIdFromPath} />
+  }
+
 
   async function saveDraft(): Promise<void> {
     setBusy(true)
@@ -187,9 +209,14 @@ export function App() {
         </p>
         <div className="flex flex-wrap gap-4 text-sm">
           <a className="underline underline-offset-4" href={publicIndexUrl} target="_blank" rel="noreferrer">Open public index.json</a>
+          {publicPostPageUrl ? (
+            <a className="underline underline-offset-4" href={publicPostPageUrl} target="_blank" rel="noreferrer">
+              Open public post page
+            </a>
+          ) : null}
           {publicPostUrl ? (
             <a className="underline underline-offset-4" href={publicPostUrl} target="_blank" rel="noreferrer">
-              Open current post markdown
+              Open raw markdown
             </a>
           ) : null}
         </div>
