@@ -4,6 +4,7 @@ import { updateNoteTitle, applyBodyUpdate, archiveNote, deleteNote, updateNoteSh
 import { useNote, useSetting, useSyncMeta } from '../lib/dbHooks'
 import { schedulePush, pushDirtyNotes } from '../lib/sync'
 import { getPublicNoteUrl, publishNote, unpublishNoteByShareId } from '../lib/remotestorage'
+import { canonicalizeBody, fetchBlobUrl, resolveBodyUrls, uploadImage } from '../lib/images'
 import { SyncStatus } from './SyncStatus'
 import { MarkdownEditor } from './MarkdownEditor'
 import { computeInsertedWordHighlights, type TextRange } from '../lib/diffHighlights'
@@ -23,6 +24,7 @@ export function NoteEditor({ noteId }: Props) {
   const highlightIncomingEnabled = highlightIncomingSetting !== 'false'
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
+  const [displayBody, setDisplayBody] = useState('')
   const [incomingHighlights, setIncomingHighlights] = useState<TextRange[]>([])
   const [hasLoaded, setHasLoaded] = useState(false)
   const [bodySyncRevision, setBodySyncRevision] = useState(0)
@@ -80,6 +82,16 @@ export function NoteEditor({ noteId }: Props) {
       currentBodyRef.current = note.body
     }
   }, [note?.updatedAt, note?.title, note?.body, meta?.isDirty, hasLoaded, highlightIncomingEnabled])
+
+  useEffect(() => {
+    let cancelled = false
+    void resolveBodyUrls(body).then((resolved) => {
+      if (!cancelled) setDisplayBody(resolved)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [body])
 
   const saveTitle = useCallback(
     async (newTitle: string) => {
@@ -179,6 +191,12 @@ export function NoteEditor({ noteId }: Props) {
     await navigator.clipboard.writeText(appPublicUrl)
   }
 
+  async function handleImageUpload(file: File): Promise<string> {
+    const canonicalPath = await uploadImage(file)
+    await fetchBlobUrl(canonicalPath)
+    return canonicalPath
+  }
+
   if (note === undefined) return <p className="p-4 text-gray-400">Loading…</p>
   if (note === null) return <p className="p-4 text-gray-400">Note not found.</p>
 
@@ -210,13 +228,15 @@ export function NoteEditor({ noteId }: Props) {
 
       <div data-testid="note-body">
         <MarkdownEditor
-          value={body}
+          value={displayBody}
           syncRevision={bodySyncRevision}
           incomingHighlightRanges={incomingHighlights}
+          onImageUpload={handleImageUpload}
           onChange={(val) => {
-            setBody(val)
-            currentBodyRef.current = val
-            saveBody(val)
+            const canonical = canonicalizeBody(val)
+            setBody(canonical)
+            currentBodyRef.current = canonical
+            saveBody(canonical)
           }}
         />
       </div>

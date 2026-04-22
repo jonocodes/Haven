@@ -25,6 +25,7 @@ function client() {
 
 const NOTES_PATH = "common/notes/";
 const TOMBSTONES_PATH = "common/tombstones/";
+const IMAGES_PATH = "common/assets/";
 const PUBLIC_NOTES_PATH = 'shared/';
 const SYNCED_SETTINGS_PATH = "common/settings/sync.json";
 
@@ -164,6 +165,26 @@ export async function pullAndApplySyncedSettings(): Promise<SyncedSettings | nul
 export async function hasRemoteTombstone(id: string): Promise<boolean> {
   const result = await client().getFile(`${TOMBSTONES_PATH}${id}.json`);
   return Boolean(result?.data);
+}
+
+export async function pushImageFile(id: string, mimeType: string, data: ArrayBuffer): Promise<void> {
+  await client().storeFile(mimeType, `${IMAGES_PATH}${id}`, data)
+}
+
+export async function pullImageAsBlob(id: string): Promise<Blob | null> {
+  const result = await client().getFile(`${IMAGES_PATH}${id}`)
+  if (!result?.data) return null
+  const mimeType = result.mimeType || 'application/octet-stream'
+
+  if (result.data instanceof Blob) {
+    return result.data
+  }
+
+  if (typeof result.data === 'string') {
+    return new Blob([result.data], { type: mimeType })
+  }
+
+  return new Blob([result.data as ArrayBuffer], { type: mimeType })
 }
 
 export async function pushTombstone(id: string): Promise<void> {
