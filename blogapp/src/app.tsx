@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ConnectWidget } from './components/ConnectWidget'
+import { PublicIndexView } from './components/PublicIndexView'
 import { PublicPostView } from './components/PublicPostView'
 import { Button } from './components/ui/button'
 import { Card, CardContent, CardHeader } from './components/ui/card'
@@ -91,6 +92,14 @@ export function App() {
   const publicIndexUrl = getPublicIndexUrl()
   const publicPostUrl = id ? getPublicPostUrl(id) : null
 
+  const publicHomePageUrl = (() => {
+    const url = new URL(window.location.href)
+    url.pathname = '/public'
+    url.search = ''
+    url.searchParams.set('index', publicIndexUrl)
+    return url.toString()
+  })()
+
   const publicPostPageUrl = id
     ? (() => {
         const url = new URL(window.location.href)
@@ -101,6 +110,10 @@ export function App() {
         return url.toString()
       })()
     : null
+
+  if (window.location.pathname === '/public') {
+    return <PublicIndexView />
+  }
 
   if (window.location.pathname.startsWith('/p/')) {
     const postIdFromPath = window.location.pathname.split('/').filter(Boolean)[1]
@@ -208,6 +221,7 @@ export function App() {
           page corner to connect.
         </p>
         <div className="flex flex-wrap gap-4 text-sm">
+          <a className="underline underline-offset-4" href={publicHomePageUrl} target="_blank" rel="noreferrer">Open public home page</a>
           <a className="underline underline-offset-4" href={publicIndexUrl} target="_blank" rel="noreferrer">Open public index.json</a>
           {publicPostPageUrl ? (
             <a className="underline underline-offset-4" href={publicPostPageUrl} target="_blank" rel="noreferrer">

@@ -264,6 +264,10 @@ Beyond markdown parsing, the highest-value features to port are:
 
 Published posts can be opened through a render route:
 
-- `/p/:id?src=<markdown-url>&meta=<meta-url>`
+- `/p/:id?src=<markdown-url>&meta=<meta-url>&index=<index-url>`
 
-This shows a read-only rendered page in-app (title + markdown body), similar to notesapp's public view pattern.
+There is also a public home/index page route:
+
+- `/public?index=<index-url>`
+
+The public home includes placeholder intro text and links to rendered post pages; each post page includes a back link to home.

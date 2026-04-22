@@ -21,6 +21,7 @@ export function PublicPostView({ postId }: Props) {
 
   const srcUrl = useMemo(() => getQueryParam('src') ?? getPublicPostUrl(postId), [postId])
   const metaUrl = useMemo(() => getQueryParam('meta') ?? getPublicMetaUrl(postId), [postId])
+  const indexUrl = useMemo(() => getQueryParam('index'), [])
 
   useEffect(() => {
     let cancelled = false
@@ -76,6 +77,14 @@ export function PublicPostView({ postId }: Props) {
   return (
     <main className="mx-auto max-w-3xl p-6">
       <header className="mb-4 border-b border-slate-200 pb-4">
+        <div className="mb-2">
+          <a
+            className="text-sm text-slate-700 underline underline-offset-4"
+            href={indexUrl ? `/public?index=${encodeURIComponent(indexUrl)}` : '/public'}
+          >
+            ← Back to home
+          </a>
+        </div>
         <h1 className="text-3xl font-semibold text-slate-900">{title}</h1>
         {updatedAt ? <p className="mt-2 text-xs text-slate-500">Updated {new Date(updatedAt).toLocaleString()}</p> : null}
       </header>
