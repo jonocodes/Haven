@@ -187,7 +187,8 @@ export function NoteEditor({ noteId }: Props) {
     const shareId = note?.share?.shareId
     if (!shareId) return
     const sourceUrl = getPublicNoteUrl(shareId)
-    const appPublicUrl = `${window.location.origin}/public/${encodeURIComponent(shareId)}?src=${encodeURIComponent(sourceUrl)}`
+    const base = `${window.location.origin}/public/${encodeURIComponent(shareId)}`
+    const appPublicUrl = sourceUrl ? `${base}?src=${encodeURIComponent(sourceUrl)}` : base
     await navigator.clipboard.writeText(appPublicUrl)
   }
 

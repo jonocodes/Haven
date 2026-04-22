@@ -224,6 +224,16 @@ export async function getNote(id: string): Promise<Note | undefined> {
   return hydrateNote(meta, content)
 }
 
+export async function getNoteByShareId(shareId: string): Promise<Note | undefined> {
+  const collections = await getRxCollections()
+  const metaDoc = await collections.notesMeta.findOne({ selector: { shareId } }).exec()
+  if (!metaDoc) return undefined
+  const meta = metaDoc.toJSON()
+  const contentDoc = await collections.notesContent.findOne(meta.id).exec()
+  if (!contentDoc) return undefined
+  return hydrateNote(meta, contentDoc.toJSON())
+}
+
 export async function getBodyText(noteId: string): Promise<string | undefined> {
   const note = await getNote(noteId)
   return note?.body
