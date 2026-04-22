@@ -1,214 +1,273 @@
-This is a blogging app where data is stored in remotestorage, and hosted via public pages.
+# Blog App (remoteStorage + public content)
 
-# TODO: write app
+A minimal blog engine where posts and metadata live in remoteStorage under `/public/`.
 
-idea
-    should have a doc for each post
-    should have a index.json for the post list. it has the metadata needed for listing. re-gen it when we publish.
+## Quick start
 
-
- a **minimal blog engine on top of remoteStorage**,
-
-Let me lock in a **simple, consistent model** you can build around:
-
----
-
-# 🧱 Final Mental Model
-
-You have exactly **two public data types**:
-
-### 1. Individual posts
-
-```
-public/posts/<shareId>
+```bash
+npm install
+npm run dev
 ```
 
-### 2. Blog index (homepage)
+Then open the local URL shown by Vite (usually `http://localhost:5173`).
 
-```
-public/blog/index
-```
+This package now includes a minimal React + Vite runtime scaffold (similar baseline stack to `notesapp`) plus the blog core library modules.
 
-That’s it. No extra layers needed.
 
----
+## Current writer UI capabilities
 
-# 📝 Responsibilities (very clear separation)
+The app now includes a simple writer interface with:
 
-### Public post
+- remoteStorage.js widget-based connect/disconnect
+- post list panel (metadata-backed)
+- markdown editor + title/excerpt fields
+- auto title/excerpt parsing from markdown (notesapp-style first H1 parsing)
+- explicit actions: Save draft, Publish, Unpublish, Delete, Rebuild index
+- open links for public index, public render route (`/p/:id`), and raw markdown
 
-* full content
-* source of truth for the article
+This is intentionally minimal and now uses shadcn-style UI primitives (Button/Input/Textarea/Card) for widgets.
 
-### Public index
+## Goals
 
-* list of posts
-* sorted by date
-* minimal summary data
-* homepage content
+- Keep authoring simple: markdown files can be edited directly from a mounted remoteStorage public directory.
+- Keep app logic simple: no CRDT, no ntfy alerts, no collaboration merge logic.
+- Keep publishing explicit: discovery comes from `index.json`.
 
----
+## Storage layout
 
-# 🔁 Core invariant
+All public blog artifacts are under one namespace:
 
-> The index is the **only way to discover posts**
+- `public/blog/posts/<id>.md` — markdown body (source of truth for content)
+- `public/blog/meta/<id>.json` — structured metadata for each post
+- `public/blog/index.json` — published post listing for discovery
 
-Everything flows from that.
 
----
+## ID strategy (slug-first)
 
-# ⚙️ Core flows (super simple)
+Use blog-friendly slugs for post ids rather than UUIDs.
 
-## Publish
+- Preferred id format: `YYYY-MM-DD-title-slug`
+- Example: `2026-04-22-remote-storage-notes`
+- If there is a collision, append a numeric suffix (`-2`, `-3`, ...).
+
+This keeps URLs readable and still avoids collisions without introducing opaque identifiers.
+
+## Example directory structure
+
+Yes — with this strategy, the markdown file name uses the post id, and the post id is the slug-style id.
 
 ```text
-1. Write public/posts/<shareId>
-2. Load public/blog/index
-3. Insert/update summary
-4. Sort by publishedAt desc
-5. Save index
+public/
+  blog/
+    index.json
+    posts/
+      2026-04-22-remote-storage-notes.md
+      2026-04-22-remote-storage-notes-2.md
+      2026-04-18-intro.md
+    meta/
+      2026-04-22-remote-storage-notes.json
+      2026-04-22-remote-storage-notes-2.json
+      2026-04-18-intro.json
 ```
 
-## Update published post
+The markdown and metadata share the same id stem.
 
-```text
-1. Update public/posts/<shareId>
-2. Update summary in index
-3. Save index
-```
+## Example public post URLs
 
-## Unpublish
+A post id like `2026-04-22-remote-storage-notes` can be visited in two common ways:
 
-```text
-1. Delete public/posts/<shareId>
-2. Remove from index
-3. Save index
-```
+1. **Reader app route** (recommended UX):
 
----
+   `https://blog.example.com/p/2026-04-22-remote-storage-notes`
 
-# 📦 Suggested minimal schemas
+2. **Direct public file URL** (raw markdown object in remoteStorage):
 
-## Public post
+   `https://<storage-host>/public/blog/posts/2026-04-22-remote-storage-notes.md`
+
+The exact `<storage-host>` depends on the user's remoteStorage provider.
+
+## Future discovery goals
+
+To keep the initial system zero-backend, prefer explicit `base` URL parameters first.
+
+Future optional enhancements:
+
+- **WebFinger discovery**: resolve `acct:user@domain` to a blog public base URL.
+- **DNS TXT discovery/verification**: publish blog base metadata in DNS for portability/trust.
+- **Resolution precedence**: define deterministic order across `base`, WebFinger, and DNS TXT.
+
+## Core invariant
+
+The index is the only way readers discover posts. A post can exist as files without being in the public index.
+
+## Post metadata schema (`public/blog/meta/<id>.json`)
 
 ```json
 {
   "version": 1,
-  "title": "Post title",
-  "body": "Full content",
-  "excerpt": "Short summary",
-  "publishedAt": "2026-04-19T18:00:00Z",
-  "updatedAt": "2026-04-19T18:10:00Z"
+  "id": "2026-04-22-my-post",
+  "title": "My Post",
+  "excerpt": "One-line summary",
+  "status": "draft",
+  "createdAt": "2026-04-22T10:00:00Z",
+  "updatedAt": "2026-04-22T10:00:00Z",
+  "publishedAt": null,
+  "deletedAt": null
 }
 ```
 
-## Public index
+`status` is one of:
+
+- `draft`
+- `published`
+- `unpublished`
+- `deleted`
+
+## Index schema (`public/blog/index.json`)
 
 ```json
 {
   "version": 1,
   "title": "My Blog",
-  "intro": "Welcome to my blog.",
-  "updatedAt": "2026-04-19T18:10:00Z",
+  "updatedAt": "2026-04-22T12:00:00Z",
   "posts": [
     {
-      "shareId": "sh_1",
-      "title": "Post title",
-      "excerpt": "Short summary",
-      "publishedAt": "2026-04-19T18:00:00Z",
-      "updatedAt": "2026-04-19T18:10:00Z"
+      "id": "2026-04-22-my-post",
+      "title": "My Post",
+      "excerpt": "One-line summary",
+      "publishedAt": "2026-04-22T11:00:00Z",
+      "updatedAt": "2026-04-22T12:00:00Z"
     }
   ]
 }
 ```
 
----
+## State machine
 
-# 🧠 Why this is the right level of complexity
+- `draft --Publish--> published`
+- `published --Unpublish--> unpublished`
+- `unpublished --Publish--> published`
+- `draft|published|unpublished --Delete--> deleted`
+- `deleted` has no transitions
 
-You intentionally **did NOT add**:
+## Button behavior
 
-* slugs
-* tags
-* categories
-* pagination
-* backend
-* search
+### Publish
 
-And that’s good — because:
+1. Read `meta/<id>.json`.
+2. Verify `posts/<id>.md` exists.
+3. Set metadata:
+   - `status = "published"`
+   - `publishedAt = publishedAt ?? now`
+   - `updatedAt = now`
+4. Save metadata.
+5. Upsert post summary into `index.json`.
+6. Sort index posts by `publishedAt` descending.
+7. Save `index.json` with `updatedAt = now`.
 
-👉 remoteStorage is strongest when you treat it like
-**“publish explicit documents, not query a database”**
+### Unpublish
 
-Your index = your “query result”
+1. Read metadata.
+2. Set `status = "unpublished"`, `updatedAt = now`.
+3. Save metadata.
+4. Remove post from `index.json.posts`.
+5. Save `index.json` with `updatedAt = now`.
 
----
+### Delete
 
-# 🚀 Nice properties you now get
+1. Confirm destructive action.
+2. Delete `posts/<id>.md`.
+3. Delete `meta/<id>.json` (or set `status = "deleted"` if soft-delete is desired).
+4. Remove post from `index.json.posts`.
+5. Save `index.json` with `updatedAt = now`.
 
-* Fully static-feeling blog, no backend
-* Works offline + sync
-* Instant publish/unpublish
-* Stable public URLs
-* Easy to extend later (RSS, tags, etc.)
+## Rebuild index (for external/offline edits)
 
----
+Because posts can be edited outside the app, include a rebuild operation:
 
-# ⚠️ One subtle thing to be aware of
+1. List `meta/*.json`.
+2. Keep records with `status === "published"` and existing `posts/<id>.md`.
+3. Map to index summary entries.
+4. Sort by `publishedAt` descending.
+5. Rewrite `index.json` from scratch.
 
-Your index is now a **single mutable document**.
+This operation is the safety net for drift between hand-edited files and the index.
 
-That means:
+## Suggested TypeScript interfaces
 
-* always treat writes as **read → modify → write**
-* avoid race conditions if you ever edit from multiple devices
+```ts
+export type PostStatus = 'draft' | 'published' | 'unpublished' | 'deleted'
 
-For now, totally fine — just something to remember later.
+export interface BlogPostMeta {
+  version: 1
+  id: string
+  title: string
+  excerpt: string
+  status: PostStatus
+  createdAt: string
+  updatedAt: string
+  publishedAt: string | null
+  deletedAt: string | null
+}
 
----
+export interface BlogIndexEntry {
+  id: string
+  title: string
+  excerpt: string
+  publishedAt: string
+  updatedAt: string
+}
 
-# 🧩 Optional tiny upgrades (later, not now)
-
-When you feel like it, these drop in easily:
-
-### 1. RSS / feed
-
-Just publish:
-
+export interface BlogIndex {
+  version: 1
+  title: string
+  updatedAt: string
+  posts: BlogIndexEntry[]
+}
 ```
-public/blog/feed.json
+
+## Suggested function signatures
+
+```ts
+export async function publishPost(id: string): Promise<void>
+export async function unpublishPost(id: string): Promise<void>
+export async function deletePost(id: string): Promise<void>
+export async function rebuildIndex(): Promise<void>
 ```
 
-### 2. Pre-rendered HTML
+## 401 troubleshooting (remoteStorage)
 
-Store:
+If you get `401` while reading/writing the blog directory:
 
-```json
-"html": "<p>Rendered content</p>"
-```
+- Ensure your app module claim and directory match. This app now defaults to:
+  - module claim: `blog-app`
+  - public scope: `/public/blog-app/`
+- If your data already lives under another public dir (for example from an earlier app), set:
+  - `VITE_PUBLIC_BLOG_DIR=<your-existing-dir>`
+- If your module name should differ, set:
+  - `VITE_RS_MODULE=<your-module-name>`
+- Reconnect via remoteStorage widget after changing env vars.
 
-### 3. Draft preview links
+In most cases this is an authorization/scope mismatch (or a stale token), not CORS.
 
-Use a second “preview” public path
+## Suggested next imports from notesapp
 
----
+Beyond markdown parsing, the highest-value features to port are:
 
-# 👍 Bottom line
+- CodeMirror editor plugins (already added): live markdown styling/link behavior and code block language highlighting.
+- Image paste/drop upload hooks in the editor.
+- Read-only public post viewer route that can load from a `?src=` URL.
+- Lightweight sync status indicator in the author UI.
 
-You made the right call:
 
-* ✔ keep ordering = date-based
-* ✔ use index only for discovery
-* ✔ duplicate small summary data
-* ✔ keep system simple
+## Public post rendering
 
----
+Published posts can be opened through a render route:
 
-If you want next, we can:
+- `/p/:id?base=<public-base-url>`
 
-* sketch the **exact functions for updating the index safely**
-* or design the **public routes (/ vs /p/:id) cleanly**
-* or think about **how to host the reader app for best UX**
+There is also a public home/index page route:
 
-All pretty fun from here.
+- `/public?base=<public-base-url>`
 
+The `base` parameter is shared across home and post URLs and points to the blog public directory (not an individual markdown file).
