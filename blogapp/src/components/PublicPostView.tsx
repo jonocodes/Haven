@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { MarkdownEditor } from './MarkdownEditor'
-import { getPublicMetaUrl, getPublicPostUrl } from '../lib/remotestorage'
+import { getPublicBaseUrl } from '../lib/remotestorage'
 import type { BlogPostMeta } from '../lib/types'
 
 interface Props {
@@ -12,6 +12,10 @@ function getQueryParam(name: string): string | null {
   return params.get(name)
 }
 
+function withTrailingSlash(url: string): string {
+  return url.endsWith('/') ? url : `${url}/`
+}
+
 export function PublicPostView({ postId }: Props) {
   const [body, setBody] = useState('')
   const [title, setTitle] = useState(postId)
@@ -19,9 +23,9 @@ export function PublicPostView({ postId }: Props) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const srcUrl = useMemo(() => getQueryParam('src') ?? getPublicPostUrl(postId), [postId])
-  const metaUrl = useMemo(() => getQueryParam('meta') ?? getPublicMetaUrl(postId), [postId])
-  const indexUrl = useMemo(() => getQueryParam('index'), [])
+  const baseUrl = useMemo(() => withTrailingSlash(getQueryParam('base') ?? getPublicBaseUrl()), [])
+  const srcUrl = useMemo(() => `${baseUrl}posts/${postId}.md`, [baseUrl, postId])
+  const metaUrl = useMemo(() => `${baseUrl}meta/${postId}.json`, [baseUrl, postId])
 
   useEffect(() => {
     let cancelled = false
@@ -80,7 +84,7 @@ export function PublicPostView({ postId }: Props) {
         <div className="mb-2">
           <a
             className="text-sm text-slate-700 underline underline-offset-4"
-            href={indexUrl ? `/public?index=${encodeURIComponent(indexUrl)}` : '/public'}
+            href={`/public?base=${encodeURIComponent(baseUrl)}`}
           >
             ← Back to home
           </a>

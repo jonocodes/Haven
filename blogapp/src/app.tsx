@@ -8,8 +8,8 @@ import { Input } from './components/ui/input'
 import { MarkdownEditor } from './components/MarkdownEditor'
 import { deletePost, generatePostId, publishPost, rebuildIndex, unpublishPost } from './lib/blogService'
 import {
+  getPublicBaseUrl,
   getPublicIndexUrl,
-  getPublicMetaUrl,
   getPublicPostUrl,
   isConnected,
   onConnected,
@@ -90,13 +90,15 @@ export function App() {
 
   const selectedMeta = useMemo(() => items.find((item) => item.id === id) ?? null, [items, id])
   const publicIndexUrl = getPublicIndexUrl()
+  const publicBaseUrl = getPublicBaseUrl()
   const publicPostUrl = id ? getPublicPostUrl(id) : null
 
   const publicHomePageUrl = (() => {
     const url = new URL(window.location.href)
     url.pathname = '/public'
     url.search = ''
-    url.searchParams.set('index', publicIndexUrl)
+    url.hash = ''
+    url.searchParams.set('base', publicBaseUrl)
     return url.toString()
   })()
 
@@ -105,8 +107,8 @@ export function App() {
         const url = new URL(window.location.href)
         url.pathname = `/p/${id}`
         url.search = ''
-        url.searchParams.set('src', getPublicPostUrl(id))
-        url.searchParams.set('meta', getPublicMetaUrl(id))
+        url.hash = ''
+        url.searchParams.set('base', publicBaseUrl)
         return url.toString()
       })()
     : null

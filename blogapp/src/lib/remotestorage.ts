@@ -60,6 +60,11 @@ export function getPublicIndexUrl(): string {
   return publicClient().getItemURL(INDEX_PATH)
 }
 
+export function getPublicBaseUrl(): string {
+  const indexUrl = getPublicIndexUrl()
+  return indexUrl.endsWith(INDEX_PATH) ? indexUrl.slice(0, -INDEX_PATH.length) : indexUrl
+}
+
 export function getPublicMetaUrl(id: string): string {
   return publicClient().getItemURL(`${META_PATH}${id}.json`)
 }

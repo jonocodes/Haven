@@ -264,10 +264,10 @@ Beyond markdown parsing, the highest-value features to port are:
 
 Published posts can be opened through a render route:
 
-- `/p/:id?src=<markdown-url>&meta=<meta-url>&index=<index-url>`
+- `/p/:id?base=<public-base-url>`
 
 There is also a public home/index page route:
 
-- `/public?index=<index-url>`
+- `/public?base=<public-base-url>`
 
-The public home includes placeholder intro text and links to rendered post pages; each post page includes a back link to home.
+The `base` parameter is shared across home and post URLs and points to the blog public directory (not an individual markdown file).

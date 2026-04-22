@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getPublicIndexUrl, getPublicMetaUrl, getPublicPostUrl } from '../lib/remotestorage'
+import { getPublicBaseUrl } from '../lib/remotestorage'
 import type { BlogIndex } from '../lib/types'
 
-function getIndexUrlFromQuery(): string | null {
+function getBaseUrlFromQuery(): string | null {
   const params = new URLSearchParams(window.location.search)
-  return params.get('index')
+  return params.get('base')
+}
+
+function withTrailingSlash(url: string): string {
+  return url.endsWith('/') ? url : `${url}/`
 }
 
 export function PublicIndexView() {
@@ -12,7 +16,8 @@ export function PublicIndexView() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const indexUrl = useMemo(() => getIndexUrlFromQuery() ?? getPublicIndexUrl(), [])
+  const baseUrl = useMemo(() => withTrailingSlash(getBaseUrlFromQuery() ?? getPublicBaseUrl()), [])
+  const indexUrl = useMemo(() => `${baseUrl}index.json`, [baseUrl])
 
   useEffect(() => {
     let cancelled = false
@@ -71,9 +76,7 @@ export function PublicIndexView() {
         {index.posts.map((post) => {
           const postUrl = new URL(window.location.origin)
           postUrl.pathname = `/p/${post.id}`
-          postUrl.searchParams.set('src', getPublicPostUrl(post.id))
-          postUrl.searchParams.set('meta', getPublicMetaUrl(post.id))
-          postUrl.searchParams.set('index', indexUrl)
+          postUrl.searchParams.set('base', baseUrl)
 
           return (
             <li key={post.id} className="rounded-lg border border-slate-200 bg-white p-4">
