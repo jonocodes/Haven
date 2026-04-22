@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
+import { ConnectWidget } from './components/ConnectWidget'
 import { deletePost, generatePostId, publishPost, rebuildIndex, unpublishPost } from './lib/blogService'
 import {
-  connectRemoteStorage,
-  disconnectRemoteStorage,
+  getPublicIndexUrl,
+  getPublicPostUrl,
   isConnected,
   onConnected,
   onDisconnected,
@@ -18,7 +19,6 @@ function sortByUpdatedDescending(items: BlogPostMeta[]): BlogPostMeta[] {
 }
 
 export function App() {
-  const [userAddress, setUserAddress] = useState('')
   const [connected, setConnected] = useState(isConnected())
   const [items, setItems] = useState<BlogPostMeta[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -81,6 +81,8 @@ export function App() {
   }
 
   const selectedMeta = useMemo(() => items.find((item) => item.id === id) ?? null, [items, id])
+  const publicIndexUrl = getPublicIndexUrl()
+  const publicPostUrl = id ? getPublicPostUrl(id) : null
 
   async function saveDraft(): Promise<void> {
     setBusy(true)
@@ -160,30 +162,18 @@ export function App() {
     }
   }
 
-  function connect(): void {
-    if (!userAddress) {
-      setError('Enter a remoteStorage user address first')
-      return
-    }
-
-    setError('')
-    connectRemoteStorage(userAddress)
-  }
-
   return (
     <main style={{ fontFamily: 'system-ui, sans-serif', margin: '2rem auto', maxWidth: 1100, lineHeight: 1.4 }}>
+      <ConnectWidget />
       <h1>Blog App (remoteStorage)</h1>
+      <p style={{ marginBottom: 16 }}>
+        Connection status: <strong>{connected ? 'Connected' : 'Not connected'}</strong>. Use the remoteStorage widget in the
+        page corner to connect.
+      </p>
 
-      <section style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16 }}>
-        <input
-          value={userAddress}
-          onChange={(event) => setUserAddress(event.target.value)}
-          placeholder="user@example.com"
-          style={{ flex: 1, padding: '8px 10px' }}
-        />
-        <button onClick={connect} type="button">Connect</button>
-        <button onClick={disconnectRemoteStorage} type="button">Disconnect</button>
-        <span>{connected ? 'Connected' : 'Not connected'}</span>
+      <section style={{ marginBottom: 16, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+        <a href={publicIndexUrl} target="_blank" rel="noreferrer">Open public index.json</a>
+        {publicPostUrl ? <a href={publicPostUrl} target="_blank" rel="noreferrer">Open current post markdown</a> : null}
       </section>
 
       <section style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16 }}>

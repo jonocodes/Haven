@@ -49,6 +49,15 @@ export function onDisconnected(cb: () => void): void {
   rs.on('disconnected', cb)
 }
 
+
+export function getPublicPostUrl(id: string): string {
+  return publicClient().getItemURL(`${POSTS_PATH}${id}.md`)
+}
+
+export function getPublicIndexUrl(): string {
+  return publicClient().getItemURL(INDEX_PATH)
+}
+
 export async function storePostMarkdown(id: string, markdown: string): Promise<void> {
   await publicClient().storeFile('text/markdown', `${POSTS_PATH}${id}.md`, markdown)
 }

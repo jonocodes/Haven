@@ -18,10 +18,11 @@ This package now includes a minimal React + Vite runtime scaffold (similar basel
 
 The app now includes a simple writer interface with:
 
-- remoteStorage connect/disconnect controls
+- remoteStorage.js widget-based connect/disconnect
 - post list panel (metadata-backed)
 - markdown editor + title/excerpt fields
 - explicit actions: Save draft, Publish, Unpublish, Delete, Rebuild index
+- open links for public index and selected post markdown
 
 This is intentionally minimal and can be restyled/refined later.
 
