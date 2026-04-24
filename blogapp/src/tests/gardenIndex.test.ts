@@ -8,11 +8,11 @@ import {
   toJsonFeed,
   unpublishMeta,
   upsertIndexEntry,
-} from '../lib/blogIndex'
-import type { BlogPostMeta } from '../lib/types'
+} from '../lib/gardenIndex'
+import type { GardenPostMeta } from '../lib/types'
 
-describe('blog index helpers', () => {
-  const baseMeta: BlogPostMeta = {
+describe('garden index helpers', () => {
+  const baseMeta: GardenPostMeta = {
     version: 1,
     id: '2026-04-22-post-1',
     title: 'Post 1',
@@ -103,6 +103,8 @@ describe('blog index helpers', () => {
       [publishedOne, publishedTwo, draft],
       (id) => (id === '2026-04-22-post-2' ? null : `https://example.com/${id}.md`),
       'Blog',
+      undefined,
+      undefined,
       '2026-04-22T15:00:00Z',
     )
 

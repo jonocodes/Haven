@@ -4,7 +4,7 @@ import { buildDatedSlugId, ensureUniqueSlugId, slugifyTitle } from '../lib/ids'
 describe('slug id helpers', () => {
   it('slugifies common titles', () => {
     expect(slugifyTitle('Hello, Remote Storage!')).toBe('hello-remote-storage')
-    expect(slugifyTitle("Sam's Blog Post")).toBe('sams-blog-post')
+    expect(slugifyTitle("Sam's First Post")).toBe('sams-first-post')
   })
 
   it('builds dated slug ids', () => {

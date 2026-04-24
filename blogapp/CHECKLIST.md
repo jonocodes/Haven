@@ -1,4 +1,4 @@
-# Blog App Implementation Checklist
+# Blog/Digital Garden App Implementation Checklist
 
 ## Foundation
 - [x] Define canonical public storage layout (`posts`, `meta`, `index`).
@@ -12,7 +12,7 @@
 - [x] Add id normalization + slug/id generation helpers.
 
 ## remoteStorage integration
-- [x] Add remoteStorage client scoped to `/public/blog/`.
+- [x] Add remoteStorage client scoped to `/public/loam/`.
 - [x] Implement read/write/remove functions for markdown, metadata, and index.
 - [ ] Add optimistic concurrency strategy for index writes.
 - [ ] Add conflict/retry handling for multi-device updates.

@@ -8,24 +8,27 @@ import {
   toJsonFeed,
   unpublishMeta,
   upsertIndexEntry,
-} from './blogIndex'
+} from './gardenIndex'
 import { buildDatedSlugId, ensureUniqueSlugId } from './ids'
 import {
   getPublicFeedUrl,
   getPublicPostUrl,
   markdownExists,
   pullAllPostMeta,
+  pullGardenSetting,
   pullIndex,
   pullPostMeta,
   removePostMarkdown,
   removePostMeta,
+  storeGardenSetting,
   storeFeed,
   storeIndex,
   storePostMeta,
 } from './remotestorage'
-import type { BlogIndex } from './types'
+import type { GardenIndex } from './types'
 
-async function loadIndexOrCreate(): Promise<BlogIndex> {
+
+async function loadIndexOrCreate(): Promise<GardenIndex> {
   return (await pullIndex()) ?? createEmptyIndex()
 }
 
@@ -35,7 +38,7 @@ export async function generatePostId(title: string, date = new Date()): Promise<
   return ensureUniqueSlugId(base, allMeta.map((meta) => meta.id))
 }
 
-async function storeIndexAndFeed(nextIndex: BlogIndex): Promise<void> {
+async function storeIndexAndFeed(nextIndex: GardenIndex): Promise<void> {
   await storeIndex(nextIndex)
   await storeFeed(toJsonFeed(nextIndex, getPublicFeedUrl() ?? undefined))
 }
@@ -93,8 +96,15 @@ export async function deletePost(id: string): Promise<void> {
   await storeIndexAndFeed(nextIndex)
 }
 
-export async function rebuildIndex(title = 'Loam'): Promise<void> {
-  const allMeta = await pullAllPostMeta()
+export async function rebuildIndex(): Promise<void> {
+  const [settingsTitle, settingsTagline, allMeta] = await Promise.all([
+    pullGardenSetting('title'),
+    pullGardenSetting('tagline'),
+    pullAllPostMeta(),
+  ])
+  const title = settingsTitle ?? 'Loam'
+  const tagline = settingsTagline ?? undefined
+
   const publishedWithExistence = await Promise.all(
     allMeta
       .filter((meta) => meta.status === 'published' && Boolean(meta.publishedAt))
@@ -104,6 +114,25 @@ export async function rebuildIndex(title = 'Loam'): Promise<void> {
   const validMeta = publishedWithExistence.filter((item) => item.exists && Boolean(item.contentUrl)).map((item) => item.meta)
   const contentUrlMap = new Map(publishedWithExistence.map((item) => [item.meta.id, item.contentUrl ?? null]))
 
-  const nextIndex = rebuildIndexFromPublishedMeta(validMeta, (id) => contentUrlMap.get(id) ?? null, title)
+  const existingIndex = await pullIndex()
+  const urlPrefix = existingIndex?.urlPrefix
+  const nextIndex = rebuildIndexFromPublishedMeta(validMeta, (id) => contentUrlMap.get(id) ?? null, title, tagline, urlPrefix)
+  await storeIndexAndFeed(nextIndex)
+}
+
+export async function saveSiteSettings(title: string, tagline: string, urlPrefix: string): Promise<void> {
+  await Promise.all([
+    storeGardenSetting('title', title),
+    storeGardenSetting('tagline', tagline),
+  ])
+
+  const index = await loadIndexOrCreate()
+  const nextIndex: GardenIndex = {
+    ...index,
+    title,
+    tagline: tagline || undefined,
+    urlPrefix: urlPrefix || undefined,
+    updatedAt: new Date().toISOString(),
+  }
   await storeIndexAndFeed(nextIndex)
 }

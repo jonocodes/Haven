@@ -1,4 +1,4 @@
-import type { BlogIndex, BlogIndexEntry, BlogPostMeta } from './types'
+import type { GardenIndex, GardenIndexEntry, GardenPostMeta } from './types'
 
 function splitIdDateAndSlug(id: string): { date: string; slug: string } {
   const datePart = id.slice(0, 10)
@@ -11,16 +11,17 @@ function splitIdDateAndSlug(id: string): { date: string; slug: string } {
   }
 }
 
-export function createEmptyIndex(title = 'Loam', now = new Date().toISOString()): BlogIndex {
+export function createEmptyIndex(title = 'Loam', tagline?: string, now = new Date().toISOString()): GardenIndex {
   return {
     version: 2,
     title,
+    ...(tagline !== undefined ? { tagline } : {}),
     updatedAt: now,
     posts: [],
   }
 }
 
-export function toIndexEntry(meta: BlogPostMeta, contentUrl: string): BlogIndexEntry {
+export function toIndexEntry(meta: GardenPostMeta, contentUrl: string): GardenIndexEntry {
   if (!meta.publishedAt) {
     throw new Error(`Post ${meta.id} has no publishedAt timestamp`)
   }
@@ -39,11 +40,11 @@ export function toIndexEntry(meta: BlogPostMeta, contentUrl: string): BlogIndexE
   }
 }
 
-export function sortPostsDescendingByPublishedAt(posts: BlogIndexEntry[]): BlogIndexEntry[] {
+export function sortPostsDescendingByPublishedAt(posts: GardenIndexEntry[]): GardenIndexEntry[] {
   return [...posts].sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
 }
 
-export function upsertIndexEntry(index: BlogIndex, entry: BlogIndexEntry, now = new Date().toISOString()): BlogIndex {
+export function upsertIndexEntry(index: GardenIndex, entry: GardenIndexEntry, now = new Date().toISOString()): GardenIndex {
   const filtered = index.posts.filter((post) => post.id !== entry.id)
   const posts = sortPostsDescendingByPublishedAt([...filtered, entry])
 
@@ -54,7 +55,7 @@ export function upsertIndexEntry(index: BlogIndex, entry: BlogIndexEntry, now = 
   }
 }
 
-export function removeIndexEntry(index: BlogIndex, postId: string, now = new Date().toISOString()): BlogIndex {
+export function removeIndexEntry(index: GardenIndex, postId: string, now = new Date().toISOString()): GardenIndex {
   return {
     ...index,
     updatedAt: now,
@@ -62,7 +63,7 @@ export function removeIndexEntry(index: BlogIndex, postId: string, now = new Dat
   }
 }
 
-export function publishMeta(meta: BlogPostMeta, now = new Date().toISOString()): BlogPostMeta {
+export function publishMeta(meta: GardenPostMeta, now = new Date().toISOString()): GardenPostMeta {
   return {
     ...meta,
     status: 'published',
@@ -72,7 +73,7 @@ export function publishMeta(meta: BlogPostMeta, now = new Date().toISOString()):
   }
 }
 
-export function unpublishMeta(meta: BlogPostMeta, now = new Date().toISOString()): BlogPostMeta {
+export function unpublishMeta(meta: GardenPostMeta, now = new Date().toISOString()): GardenPostMeta {
   return {
     ...meta,
     status: 'unpublished',
@@ -80,7 +81,7 @@ export function unpublishMeta(meta: BlogPostMeta, now = new Date().toISOString()
   }
 }
 
-export function markMetaDeleted(meta: BlogPostMeta, now = new Date().toISOString()): BlogPostMeta {
+export function markMetaDeleted(meta: GardenPostMeta, now = new Date().toISOString()): GardenPostMeta {
   return {
     ...meta,
     status: 'deleted',
@@ -90,11 +91,13 @@ export function markMetaDeleted(meta: BlogPostMeta, now = new Date().toISOString
 }
 
 export function rebuildIndexFromPublishedMeta(
-  metaRecords: BlogPostMeta[],
+  metaRecords: GardenPostMeta[],
   contentUrlById: (id: string) => string | null,
   title = 'Loam',
+  tagline?: string,
+  urlPrefix?: string,
   now = new Date().toISOString(),
-): BlogIndex {
+): GardenIndex {
   const posts = metaRecords
     .filter((meta) => meta.status === 'published')
     .filter((meta) => Boolean(meta.publishedAt))
@@ -102,11 +105,13 @@ export function rebuildIndexFromPublishedMeta(
       const contentUrl = contentUrlById(meta.id)
       return contentUrl ? toIndexEntry(meta, contentUrl) : null
     })
-    .filter((entry): entry is BlogIndexEntry => entry !== null)
+    .filter((entry): entry is GardenIndexEntry => entry !== null)
 
   return {
     version: 2,
     title,
+    ...(tagline !== undefined ? { tagline } : {}),
+    ...(urlPrefix !== undefined ? { urlPrefix } : {}),
     updatedAt: now,
     posts: sortPostsDescendingByPublishedAt(posts),
   }
@@ -128,7 +133,7 @@ interface JsonFeedV1 {
   items: JsonFeedItem[]
 }
 
-export function toJsonFeed(index: BlogIndex, feedUrl?: string): JsonFeedV1 {
+export function toJsonFeed(index: GardenIndex, feedUrl?: string): JsonFeedV1 {
   return {
     version: 'https://jsonfeed.org/version/1.1',
     title: index.title,

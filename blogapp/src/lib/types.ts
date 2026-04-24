@@ -1,6 +1,6 @@
 export type PostStatus = 'draft' | 'published' | 'unpublished' | 'deleted'
 
-export interface BlogPostMeta {
+export interface GardenPostMeta {
   version: 1
   id: string
   title: string
@@ -12,7 +12,7 @@ export interface BlogPostMeta {
   deletedAt: string | null
 }
 
-export interface BlogIndexEntry {
+export interface GardenIndexEntry {
   id: string
   title: string
   excerpt: string
@@ -20,9 +20,11 @@ export interface BlogIndexEntry {
   updatedAt: string
 }
 
-export interface BlogIndex {
-  version: 1
+export interface GardenIndex {
+  version: 1 | 2
   title: string
+  tagline?: string
+  urlPrefix?: string
   updatedAt: string
-  posts: BlogIndexEntry[]
+  posts: GardenIndexEntry[]
 }
