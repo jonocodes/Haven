@@ -218,10 +218,9 @@ export function App() {
       <ConnectWidget />
 
       <header className="mb-6 space-y-2">
-        <h1 className="text-3xl font-semibold">Blog App (remoteStorage)</h1>
+        <h1 className="text-3xl font-semibold">Loam</h1>
         <p>
-          Connection status: <strong>{connected ? 'Connected' : 'Not connected'}</strong>. Use the remoteStorage widget in the
-          page corner to connect.
+          Connection status: <strong>{connected ? 'Connected' : 'Not connected'}</strong>. Use the sync widget in the page corner to connect.
         </p>
         <div className="flex flex-wrap gap-4 text-sm">
           {publicHomePageUrl ? (

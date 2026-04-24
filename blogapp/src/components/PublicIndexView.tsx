@@ -68,7 +68,7 @@ export function PublicIndexView() {
   return (
     <main className="mx-auto max-w-3xl p-6">
       <header className="mb-6 border-b border-slate-200 pb-4">
-        <h1 className="text-3xl font-semibold text-slate-900">{index.title || 'My Blog'}</h1>
+        <h1 className="text-3xl font-semibold text-slate-900">{index.title || 'Loam'}</h1>
         <p className="mt-2 text-slate-600">Welcome! This is a placeholder intro text for your public blog home page.</p>
       </header>
 

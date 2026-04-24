@@ -11,7 +11,7 @@ function splitIdDateAndSlug(id: string): { date: string; slug: string } {
   }
 }
 
-export function createEmptyIndex(title = 'My Blog', now = new Date().toISOString()): BlogIndex {
+export function createEmptyIndex(title = 'Loam', now = new Date().toISOString()): BlogIndex {
   return {
     version: 2,
     title,
@@ -92,7 +92,7 @@ export function markMetaDeleted(meta: BlogPostMeta, now = new Date().toISOString
 export function rebuildIndexFromPublishedMeta(
   metaRecords: BlogPostMeta[],
   contentUrlById: (id: string) => string | null,
-  title = 'My Blog',
+  title = 'Loam',
   now = new Date().toISOString(),
 ): BlogIndex {
   const posts = metaRecords

@@ -93,7 +93,7 @@ export async function deletePost(id: string): Promise<void> {
   await storeIndexAndFeed(nextIndex)
 }
 
-export async function rebuildIndex(title = 'My Blog'): Promise<void> {
+export async function rebuildIndex(title = 'Loam'): Promise<void> {
   const allMeta = await pullAllPostMeta()
   const publishedWithExistence = await Promise.all(
     allMeta
