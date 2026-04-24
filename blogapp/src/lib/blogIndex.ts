@@ -1,25 +1,41 @@
 import type { BlogIndex, BlogIndexEntry, BlogPostMeta } from './types'
 
-export function createEmptyIndex(title = 'My Blog', now = new Date().toISOString()): BlogIndex {
+function splitIdDateAndSlug(id: string): { date: string; slug: string } {
+  const datePart = id.slice(0, 10)
+  const slugPart = id.slice(11)
+  const hasDate = /^\d{4}-\d{2}-\d{2}$/.test(datePart)
+
   return {
-    version: 1,
+    date: hasDate ? datePart : '',
+    slug: slugPart || id,
+  }
+}
+
+export function createEmptyIndex(title = 'Loam', now = new Date().toISOString()): BlogIndex {
+  return {
+    version: 2,
     title,
     updatedAt: now,
     posts: [],
   }
 }
 
-export function toIndexEntry(meta: BlogPostMeta): BlogIndexEntry {
+export function toIndexEntry(meta: BlogPostMeta, contentUrl: string): BlogIndexEntry {
   if (!meta.publishedAt) {
     throw new Error(`Post ${meta.id} has no publishedAt timestamp`)
   }
 
+  const { date, slug } = splitIdDateAndSlug(meta.id)
+
   return {
     id: meta.id,
+    slug,
+    date,
     title: meta.title,
     excerpt: meta.excerpt,
     publishedAt: meta.publishedAt,
     updatedAt: meta.updatedAt,
+    contentUrl,
   }
 }
 
@@ -75,20 +91,55 @@ export function markMetaDeleted(meta: BlogPostMeta, now = new Date().toISOString
 
 export function rebuildIndexFromPublishedMeta(
   metaRecords: BlogPostMeta[],
-  markdownExists: (id: string) => boolean,
-  title = 'My Blog',
+  contentUrlById: (id: string) => string | null,
+  title = 'Loam',
   now = new Date().toISOString(),
 ): BlogIndex {
   const posts = metaRecords
     .filter((meta) => meta.status === 'published')
     .filter((meta) => Boolean(meta.publishedAt))
-    .filter((meta) => markdownExists(meta.id))
-    .map(toIndexEntry)
+    .map((meta) => {
+      const contentUrl = contentUrlById(meta.id)
+      return contentUrl ? toIndexEntry(meta, contentUrl) : null
+    })
+    .filter((entry): entry is BlogIndexEntry => entry !== null)
 
   return {
-    version: 1,
+    version: 2,
     title,
     updatedAt: now,
     posts: sortPostsDescendingByPublishedAt(posts),
+  }
+}
+
+interface JsonFeedItem {
+  id: string
+  url: string
+  title: string
+  summary: string
+  date_published: string
+  date_modified: string
+}
+
+interface JsonFeedV1 {
+  version: 'https://jsonfeed.org/version/1.1'
+  title: string
+  feed_url?: string
+  items: JsonFeedItem[]
+}
+
+export function toJsonFeed(index: BlogIndex, feedUrl?: string): JsonFeedV1 {
+  return {
+    version: 'https://jsonfeed.org/version/1.1',
+    title: index.title,
+    ...(feedUrl ? { feed_url: feedUrl } : {}),
+    items: index.posts.map((post) => ({
+      id: post.id,
+      url: post.contentUrl,
+      title: post.title,
+      summary: post.excerpt,
+      date_published: post.publishedAt,
+      date_modified: post.updatedAt,
+    })),
   }
 }

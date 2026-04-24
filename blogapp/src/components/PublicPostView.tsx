@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { MarkdownEditor } from './MarkdownEditor'
-import { getPublicBaseUrl } from '../lib/remotestorage'
-import type { BlogPostMeta } from '../lib/types'
+import { getPublicIndexUrl } from '../lib/remotestorage'
+import type { BlogIndexEntry } from '../lib/types'
 
 interface Props {
   postId: string
@@ -12,30 +12,20 @@ function getQueryParam(name: string): string | null {
   return params.get(name)
 }
 
-function withTrailingSlash(url: string): string {
-  return url.endsWith('/') ? url : `${url}/`
-}
-
 export function PublicPostView({ postId }: Props) {
   const [body, setBody] = useState('')
-  const [title, setTitle] = useState(postId)
-  const [updatedAt, setUpdatedAt] = useState<string | null>(null)
+  const [post, setPost] = useState<BlogIndexEntry | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const baseUrl = useMemo(() => {
-    const resolved = getQueryParam('base') ?? getPublicBaseUrl()
-    return resolved ? withTrailingSlash(resolved) : null
-  }, [])
-  const srcUrl = useMemo(() => (baseUrl ? `${baseUrl}posts/${postId}.md` : null), [baseUrl, postId])
-  const metaUrl = useMemo(() => (baseUrl ? `${baseUrl}meta/${postId}.json` : null), [baseUrl, postId])
+  const indexUrl = useMemo(() => getQueryParam('index') ?? getPublicIndexUrl(), [])
 
   useEffect(() => {
     let cancelled = false
 
     async function load() {
-      if (!srcUrl || !metaUrl) {
-        setError('No public base URL available yet. Connect to remoteStorage first or provide ?base=.')
+      if (!indexUrl) {
+        setError('No public index URL available yet. Connect to remoteStorage first or provide ?index=.')
         setLoading(false)
         return
       }
@@ -43,23 +33,26 @@ export function PublicPostView({ postId }: Props) {
       setError(null)
 
       try {
-        const [metaRes, bodyRes] = await Promise.all([fetch(metaUrl), fetch(srcUrl)])
+        const indexRes = await fetch(indexUrl)
+        if (!indexRes.ok) {
+          throw new Error(`Unable to load blog index (${indexRes.status})`)
+        }
 
+        const index = (await indexRes.json()) as { posts?: BlogIndexEntry[] }
+        const entry = index.posts?.find((item) => item.id === postId)
+        if (!entry) {
+          throw new Error('Post not found in index.')
+        }
+
+        const bodyRes = await fetch(entry.contentUrl)
         if (!bodyRes.ok) {
           throw new Error(`Unable to load post body (${bodyRes.status})`)
         }
 
         const rawBody = await bodyRes.text()
         if (!cancelled) {
+          setPost(entry)
           setBody(rawBody)
-        }
-
-        if (metaRes.ok) {
-          const parsedMeta = (await metaRes.json()) as BlogPostMeta
-          if (!cancelled) {
-            setTitle(parsedMeta.title || postId)
-            setUpdatedAt(parsedMeta.updatedAt)
-          }
         }
       } catch (err) {
         if (!cancelled) {
@@ -76,7 +69,7 @@ export function PublicPostView({ postId }: Props) {
     return () => {
       cancelled = true
     }
-  }, [metaUrl, postId, srcUrl])
+  }, [indexUrl, postId])
 
   if (loading) {
     return <p className="mx-auto max-w-3xl p-6 text-slate-500">Loading public post...</p>
@@ -92,13 +85,13 @@ export function PublicPostView({ postId }: Props) {
         <div className="mb-2">
           <a
             className="text-sm text-slate-700 underline underline-offset-4"
-            href={baseUrl ? `/public?base=${encodeURIComponent(baseUrl)}` : '/public'}
+            href={indexUrl ? `/public?index=${encodeURIComponent(indexUrl)}` : '/public'}
           >
             ← Back to home
           </a>
         </div>
-        <h1 className="text-3xl font-semibold text-slate-900">{title}</h1>
-        {updatedAt ? <p className="mt-2 text-xs text-slate-500">Updated {new Date(updatedAt).toLocaleString()}</p> : null}
+        <h1 className="text-3xl font-semibold text-slate-900">{post?.title ?? postId}</h1>
+        {post?.updatedAt ? <p className="mt-2 text-xs text-slate-500">Updated {new Date(post.updatedAt).toLocaleString()}</p> : null}
       </header>
       <MarkdownEditor value={body} onChange={setBody} readOnly />
     </main>
