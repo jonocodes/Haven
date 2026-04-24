@@ -8,7 +8,7 @@ import { Input } from './components/ui/input'
 import { MarkdownEditor } from './components/MarkdownEditor'
 import { deletePost, generatePostId, publishPost, rebuildIndex, unpublishPost } from './lib/blogService'
 import {
-  getPublicBaseUrl,
+  getPublicFeedUrl,
   getPublicIndexUrl,
   getPublicPostUrl,
   isConnected,
@@ -90,27 +90,27 @@ export function App() {
 
   const selectedMeta = useMemo(() => items.find((item) => item.id === id) ?? null, [items, id])
   const publicIndexUrl = getPublicIndexUrl()
-  const publicBaseUrl = getPublicBaseUrl()
+  const publicFeedUrl = getPublicFeedUrl()
   const publicPostUrl = id ? getPublicPostUrl(id) : null
 
-  const publicHomePageUrl = publicBaseUrl
+  const publicHomePageUrl = publicIndexUrl
     ? (() => {
         const url = new URL(window.location.href)
         url.pathname = '/public'
         url.search = ''
         url.hash = ''
-        url.searchParams.set('base', publicBaseUrl)
+        url.searchParams.set('index', publicIndexUrl)
         return url.toString()
       })()
     : null
 
-  const publicPostPageUrl = id && publicBaseUrl
+  const publicPostPageUrl = id && publicIndexUrl
     ? (() => {
         const url = new URL(window.location.href)
         url.pathname = `/p/${id}`
         url.search = ''
         url.hash = ''
-        url.searchParams.set('base', publicBaseUrl)
+        url.searchParams.set('index', publicIndexUrl)
         return url.toString()
       })()
     : null
@@ -126,7 +126,6 @@ export function App() {
     }
     return <PublicPostView postId={postIdFromPath} />
   }
-
 
   async function saveDraft(): Promise<void> {
     setBusy(true)
@@ -230,6 +229,9 @@ export function App() {
           ) : null}
           {publicIndexUrl ? (
             <a className="underline underline-offset-4" href={publicIndexUrl} target="_blank" rel="noreferrer">Open public index.json</a>
+          ) : null}
+          {publicFeedUrl ? (
+            <a className="underline underline-offset-4" href={publicFeedUrl} target="_blank" rel="noreferrer">Open public feed.json</a>
           ) : null}
           {publicPostPageUrl ? (
             <a className="underline underline-offset-4" href={publicPostPageUrl} target="_blank" rel="noreferrer">

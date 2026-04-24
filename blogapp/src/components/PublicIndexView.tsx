@@ -1,14 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getPublicBaseUrl } from '../lib/remotestorage'
+import { getPublicIndexUrl } from '../lib/remotestorage'
 import type { BlogIndex } from '../lib/types'
 
-function getBaseUrlFromQuery(): string | null {
+function getIndexUrlFromQuery(): string | null {
   const params = new URLSearchParams(window.location.search)
-  return params.get('base')
-}
-
-function withTrailingSlash(url: string): string {
-  return url.endsWith('/') ? url : `${url}/`
+  return params.get('index')
 }
 
 export function PublicIndexView() {
@@ -16,18 +12,14 @@ export function PublicIndexView() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const baseUrl = useMemo(() => {
-    const resolved = getBaseUrlFromQuery() ?? getPublicBaseUrl()
-    return resolved ? withTrailingSlash(resolved) : null
-  }, [])
-  const indexUrl = useMemo(() => (baseUrl ? `${baseUrl}index.json` : null), [baseUrl])
+  const indexUrl = useMemo(() => getIndexUrlFromQuery() ?? getPublicIndexUrl(), [])
 
   useEffect(() => {
     let cancelled = false
 
     async function load() {
       if (!indexUrl) {
-        setError('No public base URL available yet. Connect to remoteStorage first or provide ?base=.')
+        setError('No public index URL available yet. Connect to remoteStorage first or provide ?index=.')
         setLoading(false)
         return
       }
@@ -84,7 +76,7 @@ export function PublicIndexView() {
         {index.posts.map((post) => {
           const postUrl = new URL(window.location.origin)
           postUrl.pathname = `/p/${post.id}`
-          if (baseUrl) postUrl.searchParams.set('base', baseUrl)
+          if (indexUrl) postUrl.searchParams.set('index', indexUrl)
 
           return (
             <li key={post.id} className="rounded-lg border border-slate-200 bg-white p-4">
@@ -92,7 +84,7 @@ export function PublicIndexView() {
                 {post.title}
               </a>
               <p className="mt-1 text-sm text-slate-600">{post.excerpt}</p>
-              <p className="mt-2 text-xs text-slate-500">Published {new Date(post.publishedAt).toLocaleString()}</p>
+              <p className="mt-2 text-xs text-slate-500">Published {post.date || new Date(post.publishedAt).toLocaleDateString()}</p>
             </li>
           )
         })}

@@ -35,6 +35,7 @@ function itemUrl(path: string): string | null {
 const POSTS_PATH = 'posts/'
 const META_PATH = 'meta/'
 const INDEX_PATH = 'index.json'
+const FEED_PATH = 'feed.json'
 const SETTINGS_PATH = 'settings/blog.json'
 
 export function connectRemoteStorage(userAddress: string): void {
@@ -65,14 +66,8 @@ export function getPublicIndexUrl(): string | null {
   return itemUrl(INDEX_PATH)
 }
 
-export function getPublicBaseUrl(): string | null {
-  const indexUrl = getPublicIndexUrl()
-  if (!indexUrl) return null
-  return indexUrl.endsWith(INDEX_PATH) ? indexUrl.slice(0, -INDEX_PATH.length) : indexUrl
-}
-
-export function getPublicMetaUrl(id: string): string | null {
-  return itemUrl(`${META_PATH}${id}.json`)
+export function getPublicFeedUrl(): string | null {
+  return itemUrl(FEED_PATH)
 }
 
 export function getPublicScopePath(): string {
@@ -103,21 +98,21 @@ export async function removePostMarkdown(id: string): Promise<void> {
 }
 
 export async function storePostMeta(meta: BlogPostMeta): Promise<void> {
-  await publicClient().storeFile('application/json', `${META_PATH}${meta.id}.json`, JSON.stringify(meta))
+  await privateClient().storeFile('application/json', `${META_PATH}${meta.id}.json`, JSON.stringify(meta))
 }
 
 export async function pullPostMeta(id: string): Promise<BlogPostMeta | null> {
-  const result = await publicClient().getFile(`${META_PATH}${id}.json`)
+  const result = await privateClient().getFile(`${META_PATH}${id}.json`)
   if (!result?.data) return null
   return JSON.parse(result.data as string) as BlogPostMeta
 }
 
 export async function removePostMeta(id: string): Promise<void> {
-  await publicClient().remove(`${META_PATH}${id}.json`)
+  await privateClient().remove(`${META_PATH}${id}.json`)
 }
 
 export async function listPostMetaIds(): Promise<string[]> {
-  const listing = await publicClient().getListing(META_PATH)
+  const listing = await privateClient().getListing(META_PATH)
   if (!listing) return []
 
   return Object.keys(listing)
@@ -139,6 +134,10 @@ export async function pullIndex(): Promise<BlogIndex | null> {
   const result = await publicClient().getFile(INDEX_PATH)
   if (!result?.data) return null
   return JSON.parse(result.data as string) as BlogIndex
+}
+
+export async function storeFeed(feed: unknown): Promise<void> {
+  await publicClient().storeFile('application/json', FEED_PATH, JSON.stringify(feed))
 }
 
 export async function markdownExists(id: string): Promise<boolean> {

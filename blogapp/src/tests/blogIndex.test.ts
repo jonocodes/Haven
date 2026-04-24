@@ -5,6 +5,7 @@ import {
   publishMeta,
   rebuildIndexFromPublishedMeta,
   removeIndexEntry,
+  toJsonFeed,
   unpublishMeta,
   upsertIndexEntry,
 } from '../lib/blogIndex'
@@ -13,7 +14,7 @@ import type { BlogPostMeta } from '../lib/types'
 describe('blog index helpers', () => {
   const baseMeta: BlogPostMeta = {
     version: 1,
-    id: 'post-1',
+    id: '2026-04-22-post-1',
     title: 'Post 1',
     excerpt: 'Excerpt 1',
     status: 'draft',
@@ -48,43 +49,67 @@ describe('blog index helpers', () => {
     const withFirst = upsertIndexEntry(
       index,
       {
-        id: 'post-1',
+        id: '2026-04-22-post-1',
+        slug: 'post-1',
+        date: '2026-04-22',
         title: 'Post 1',
         excerpt: 'First',
         publishedAt: '2026-04-22T12:00:00Z',
         updatedAt: '2026-04-22T12:00:00Z',
+        contentUrl: 'https://example.com/post-1.md',
       },
       '2026-04-22T12:01:00Z',
     )
 
     expect(withFirst.posts).toHaveLength(1)
 
-    const removed = removeIndexEntry(withFirst, 'post-1', '2026-04-22T12:02:00Z')
+    const removed = removeIndexEntry(withFirst, '2026-04-22-post-1', '2026-04-22T12:02:00Z')
     expect(removed.posts).toHaveLength(0)
   })
 
-  it('rebuilds index from published metadata only and checks markdown existence', () => {
+  it('exports JSON Feed 1.1 from index entries', () => {
+    const index = createEmptyIndex('Blog', '2026-04-22T10:00:00Z')
+    const withPost = upsertIndexEntry(index, {
+      id: '2026-04-22-post-1',
+      slug: 'post-1',
+      date: '2026-04-22',
+      title: 'Post 1',
+      excerpt: 'First',
+      publishedAt: '2026-04-22T12:00:00Z',
+      updatedAt: '2026-04-22T12:00:00Z',
+      contentUrl: 'https://example.com/post-1.md',
+    })
+
+    const feed = toJsonFeed(withPost, 'https://example.com/feed.json')
+    expect(feed.version).toBe('https://jsonfeed.org/version/1.1')
+    expect(feed.feed_url).toBe('https://example.com/feed.json')
+    expect(feed.items[0].url).toBe('https://example.com/post-1.md')
+  })
+
+  it('rebuilds index from published metadata only and checks content URL existence', () => {
     const publishedOne = publishMeta(baseMeta, '2026-04-22T12:00:00Z')
     const publishedTwo = publishMeta(
       {
         ...baseMeta,
-        id: 'post-2',
+        id: '2026-04-22-post-2',
         title: 'Post 2',
         excerpt: 'Second',
       },
       '2026-04-22T11:00:00Z',
     )
-    const draft = { ...baseMeta, id: 'post-3', status: 'draft' as const }
+    const draft = { ...baseMeta, id: '2026-04-22-post-3', status: 'draft' as const }
 
     const rebuilt = rebuildIndexFromPublishedMeta(
       [publishedOne, publishedTwo, draft],
-      (id) => id !== 'post-2',
+      (id) => (id === '2026-04-22-post-2' ? null : `https://example.com/${id}.md`),
       'Blog',
       '2026-04-22T15:00:00Z',
     )
 
     expect(rebuilt.posts).toHaveLength(1)
-    expect(rebuilt.posts[0].id).toBe('post-1')
+    expect(rebuilt.posts[0].id).toBe('2026-04-22-post-1')
+    expect(rebuilt.posts[0].slug).toBe('post-1')
+    expect(rebuilt.posts[0].date).toBe('2026-04-22')
     expect(rebuilt.updatedAt).toBe('2026-04-22T15:00:00Z')
   })
 })
